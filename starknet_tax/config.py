@@ -145,4 +145,5 @@ PUBLIC_RPC_URLS = [
 
 ISRAEL_CGT_RATE = 0.25          # Standard capital-gains tax rate
 ISRAEL_SURTAX_THRESHOLD = 721_560  # NIS — surtax kicks in above this
-ISRAEL_SURTAX_RATE = 0.05       # 3% + 2% additional capital-income surtax
+ISRAEL_SURTAX_RATE = 0.03       # Section 121B(f); some CPAs argue 5% (121B(b))
+                                 # for crypto — consult your CPA

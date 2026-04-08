@@ -170,12 +170,34 @@ def _sn_keccak(name: str) -> str:
 _CONVERT_TO_ASSETS_SELECTOR = _sn_keccak("convert_to_assets")
 
 
+def _rpc_call(rpc_url: str, method: str, params, session: requests.Session | None = None) -> object:
+    """Low-level JSON-RPC helper used by pricing-layer functions."""
+    sess = session or requests.Session()
+    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    for attempt in range(3):
+        try:
+            resp = sess.post(rpc_url, json=payload, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            if "error" in data:
+                raise RuntimeError(f"RPC error: {data['error']}")
+            return data.get("result")
+        except requests.RequestException as exc:
+            if attempt == 2:
+                raise RuntimeError(f"RPC call {method} failed: {exc}") from exc
+            time.sleep(2 ** attempt)
+    raise RuntimeError("unreachable")
+
+
+
 def _fetch_onchain_exchange_rate(
     vault_contract: str,
     rpc_url: str,
+    block_id: str | dict = "latest",
+    session: requests.Session | None = None,
 ) -> Decimal:
     """
-    Call vault.convert_to_assets(1e18) at the latest block.
+    Call vault.convert_to_assets(1e18) at *block_id*.
     Returns the number of parent-token units equivalent to 1 liquid-staking token.
 
     Raises RuntimeError if the call fails after retries.
@@ -183,41 +205,25 @@ def _fetch_onchain_exchange_rate(
     ONE_E18_LOW  = hex(10 ** 18)
     ONE_E18_HIGH = "0x0"
 
-    payload = {
-        "jsonrpc": "2.0", "id": 1,
-        "method": "starknet_call",
-        "params": {
+    result = _rpc_call(
+        rpc_url,
+        "starknet_call",
+        {
             "request": {
                 "contract_address": vault_contract,
                 "entry_point_selector": _CONVERT_TO_ASSETS_SELECTOR,
                 "calldata": [ONE_E18_LOW, ONE_E18_HIGH],
             },
-            "block_id": "latest",
+            "block_id": block_id,
         },
-    }
-    session = requests.Session()
-    for attempt in range(3):
-        try:
-            resp = session.post(rpc_url, json=payload, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-            if "error" in data:
-                raise RuntimeError(f"RPC error: {data['error']}")
-            result = data.get("result", [])
-            if not result:
-                raise RuntimeError("convert_to_assets returned empty result")
-            # Result is a u256 (low, high); high should be 0 for any realistic rate
-            low  = int(result[0], 16)
-            high = int(result[1], 16) if len(result) > 1 else 0
-            raw  = low + (high << 128)
-            return Decimal(raw) / Decimal(10 ** 18)
-        except requests.RequestException as exc:
-            if attempt == 2:
-                raise RuntimeError(
-                    f"Failed to fetch on-chain exchange rate from {vault_contract}: {exc}"
-                ) from exc
-            time.sleep(2 ** attempt)
-    raise RuntimeError("unreachable")
+        session,
+    )
+    if not result:
+        raise RuntimeError("convert_to_assets returned empty result")
+    low  = int(result[0], 16)
+    high = int(result[1], 16) if len(result) > 1 else 0
+    raw  = low + (high << 128)
+    return Decimal(raw) / Decimal(10 ** 18)
 
 
 # ── PriceCache ────────────────────────────────────────────────────────────────
@@ -237,8 +243,19 @@ class PriceCache:
         self._session = requests.Session()
         self._rpc_url = rpc_url
 
-    def warm_up(self, symbols: set[str], from_date: date, to_date: date) -> None:
-        """Pre-fetch all prices for the given symbols and date range."""
+    def warm_up(
+        self,
+        symbols: set[str],
+        from_date: date,
+        to_date: date,
+        earliest_block: int | None = None,
+    ) -> None:
+        """Pre-fetch all prices for the given symbols and date range.
+
+        *earliest_block* is the block number of the oldest fetched transaction.
+        It is used to query the on-chain vault rate at the start of the period
+        for liquid-staking token interpolation (zero extra RPC calls).
+        """
         # Cap to today — prices don't exist for future dates.
         today        = date.today()
         effective_to = min(to_date, today)
@@ -303,6 +320,9 @@ class PriceCache:
                 print(f"  {symbol}: {len(ils)} day(s) (DeFiLlama USD × BOI rate).")
 
         # ── Step 4: liquid staking tokens — parent price × on-chain vault rate ──
+        # Fetch the vault rate at two points (period-start block + latest) and
+        # linearly interpolate for intermediate dates.  This corrects the ~8%/yr
+        # drift that the old "latest-only" approach suffered from.
         for symbol, (parent_symbol, vault_contract) in LIQUID_STAKING_SOURCES.items():
             if symbol not in symbols:
                 continue
@@ -318,17 +338,38 @@ class PriceCache:
                 raise RuntimeError(
                     f"Cannot price {symbol}: parent token {parent_symbol} has no cached prices."
                 )
-            print(f"  Fetching {symbol} exchange rate from vault {vault_contract[:14]}... (on-chain)")
-            rate = _fetch_onchain_exchange_rate(vault_contract, self._rpc_url)
-            print(
-                f"  {symbol}: on-chain rate = {rate:.8f} {parent_symbol}/{symbol} "
-                f"(latest block — constant approximation, drifts ~8%/year with staking rewards)"
+
+            print(f"  Fetching {symbol} vault rate (latest" +
+                  (f" + block {earliest_block}" if earliest_block else "") + ")...")
+            rate_end = _fetch_onchain_exchange_rate(
+                vault_contract, self._rpc_url, "latest", self._session,
             )
+
+            rate_start = rate_end
+            if earliest_block is not None:
+                try:
+                    rate_start = _fetch_onchain_exchange_rate(
+                        vault_contract, self._rpc_url,
+                        {"block_number": earliest_block}, self._session,
+                    )
+                except Exception as exc:
+                    print(f"  Warning: historical vault rate fetch failed ({exc}); "
+                          f"using latest-only.")
+
+            total_days = max(1, (effective_to - from_date).days)
+            print(
+                f"  {symbol}: vault rate {rate_start:.8f} (≈{from_date}) → "
+                f"{rate_end:.8f} (latest); interpolating over {total_days} days."
+            )
+
             ils: dict[date, Decimal] = {}
             for d, parent_price in parent_prices.items():
-                ils[d] = parent_price * rate
+                t = Decimal((d - from_date).days) / Decimal(total_days)
+                t = max(Decimal(0), min(t, Decimal(1)))
+                rate_d = rate_start + (rate_end - rate_start) * t
+                ils[d] = parent_price * rate_d
             self._cache[symbol] = ils
-            print(f"  {symbol}: {len(ils)} day(s) derived from {parent_symbol} × {rate:.6f}.")
+            print(f"  {symbol}: {len(ils)} day(s) derived from {parent_symbol} × interpolated vault rate.")
 
     def get(self, symbol: str, target_date: date) -> Optional[Decimal]:
         """

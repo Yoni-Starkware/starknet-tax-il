@@ -2,7 +2,8 @@
 Apply Israeli tax rules to classified events and produce per-event tax calculations.
 
 Key rules:
-- Capital gains tax: 25% flat (+ 5% surtax above 721,560 NIS total capital income)
+- Capital gains tax: 25% flat (+ 3% surtax above 721,560 NIS per Section 121B(f);
+  some CPAs apply 5% if crypto falls under Section 121B(b) — consult your CPA)
 - Staking / DeFi income: taxed at 25% CGT for passive investors
   (active validators / heavy traders may face marginal income tax — flagged)
 - FIFO cost basis
@@ -239,7 +240,7 @@ def process_events(
     cgt = (taxable_amount * Decimal(str(ISRAEL_CGT_RATE))).quantize(Decimal("0.01"), ROUND_HALF_UP)
     summary.cgt_owed_ils = cgt
 
-    # Surtax (5%) on capital income above threshold
+    # Surtax on capital income above threshold (rate set in config.py)
     if taxable_amount > ISRAEL_SURTAX_THRESHOLD:
         surtax_base = taxable_amount - Decimal(str(ISRAEL_SURTAX_THRESHOLD))
         summary.surtax_owed_ils = (surtax_base * Decimal(str(ISRAEL_SURTAX_RATE))).quantize(

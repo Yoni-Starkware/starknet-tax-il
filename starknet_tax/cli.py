@@ -182,8 +182,10 @@ def main(
     price_from = min(all_event_dates) if all_event_dates else from_d
     price_to   = max(all_event_dates) if all_event_dates else to_d
 
+    earliest_block = min((tx.block_number for tx in transactions), default=None)
+
     prices = PriceCache(rpc_url=rpc_url)
-    prices.warm_up(all_symbols, price_from, price_to)
+    prices.warm_up(all_symbols, price_from, price_to, earliest_block=earliest_block)
 
     # Step 4: Tax calculation
     click.echo("\nStep 4/4: Calculating tax (FIFO, Israeli CGT rules)...")
@@ -203,7 +205,7 @@ def main(
     click.echo(f"  ─────────────────────────────────")
     click.echo(f"  CGT (25%)              : ₪{summary.cgt_owed_ils:>12,.2f}")
     if summary.surtax_owed_ils > 0:
-        click.echo(f"  Surtax (5%)            : ₪{summary.surtax_owed_ils:>12,.2f}")
+        click.echo(f"  Surtax (3%)            : ₪{summary.surtax_owed_ils:>12,.2f}")
     click.echo(f"  ═════════════════════════════════")
     click.echo(f"  TOTAL TAX OWED         : ₪{summary.total_tax_owed_ils:>12,.2f}")
     click.echo("=" * 50)

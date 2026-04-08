@@ -146,8 +146,10 @@ def _run_report(
         price_from = min(all_event_dates) if all_event_dates else from_d
         price_to   = max(all_event_dates) if all_event_dates else to_d
 
+        earliest_block = min((tx.block_number for tx in transactions), default=None)
+
         prices = PriceCache(rpc_url=rpc_url)
-        prices.warm_up(all_symbols, price_from, price_to)
+        prices.warm_up(all_symbols, price_from, price_to, earliest_block=earliest_block)
 
         # Step 4: Tax
         print("\nStep 4/4: Calculating tax (FIFO, Israeli CGT rules)...")

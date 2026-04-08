@@ -14,7 +14,6 @@ import csv
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import TextIO
 
 from .classifier import EventType
 from .config import ISRAEL_CGT_RATE, ISRAEL_SURTAX_RATE
@@ -69,6 +68,32 @@ def _format_flows(flows, prices: dict[str, Decimal]) -> tuple[str, str, str]:
     return tokens, amounts, " + ".join(price_strs)
 
 
+_LARGE_RECEIVE_THRESHOLD = Decimal("100")  # NIS — flag RECEIVE events above this
+
+
+def _is_large_receive(pe: ProcessedEvent) -> bool:
+    """True when a RECEIVE event carries a significant NIS value."""
+    if pe.event.event_type != EventType.RECEIVE:
+        return False
+    total = Decimal(0)
+    for f in pe.event.tokens_in:
+        p = pe.event.price_ils_in.get(f.symbol, Decimal(0))
+        total += f.amount * p
+    return total > _LARGE_RECEIVE_THRESHOLD
+
+
+def _build_notes(pe: ProcessedEvent) -> str:
+    if pe.needs_review:
+        return f"REVIEW: {pe.review_reason}"
+    base = pe.event.notes or ""
+    if _is_large_receive(pe):
+        base += (
+            " ⚠ LARGE INCOMING TRANSFER — if this is an airdrop or grant it must "
+            "be reported as income at FMV on receipt date."
+        )
+    return base
+
+
 def write_detail_section(writer: csv.writer, events: list[ProcessedEvent]) -> None:
     writer.writerow([])
     writer.writerow(["=== SECTION 1: TRANSACTION DETAIL / פירוט עסקאות ==="])
@@ -80,14 +105,20 @@ def write_detail_section(writer: csv.writer, events: list[ProcessedEvent]) -> No
         token_in, amount_in, price_in = _format_flows(evt.tokens_in, evt.price_ils_in)
         token_out, amount_out, price_out = _format_flows(evt.tokens_out, evt.price_ils_out)
 
+        # Non-taxable lock-ups have no proceeds or cost basis — show ₪0.
+        non_taxable = evt.event_type in (EventType.STAKE_DEPOSIT, EventType.STAKE_WITHDRAWAL)
+
         # Proceeds = sum of (amount_out * price_out)
         proceeds = Decimal(0)
-        for f in evt.tokens_out:
-            p = evt.price_ils_out.get(f.symbol, Decimal(0))
-            proceeds += f.amount * p
+        if not non_taxable:
+            for f in evt.tokens_out:
+                p = evt.price_ils_out.get(f.symbol, Decimal(0))
+                proceeds += f.amount * p
 
         # Cost basis = sum from FIFO disposals
-        cost_basis = sum((d.cost_basis_ils for d in pe.disposals), Decimal(0))
+        cost_basis = Decimal(0) if non_taxable else sum(
+            (d.cost_basis_ils for d in pe.disposals), Decimal(0),
+        )
 
         writer.writerow([
             evt.timestamp.strftime("%Y-%m-%d %H:%M UTC"),
@@ -104,8 +135,8 @@ def write_detail_section(writer: csv.writer, events: list[ProcessedEvent]) -> No
             _d(pe.net_gain_loss_ils),
             _d(pe.income_ils),
             _d(pe.fee_ils),
-            "YES" if pe.needs_review else "",
-            evt.notes if not pe.needs_review else f"REVIEW: {pe.review_reason}",
+            "YES" if pe.needs_review or _is_large_receive(pe) else "",
+            _build_notes(pe),
         ])
 
 
@@ -191,7 +222,8 @@ def write_summary_section(
          _d(max(Decimal(0), summary.total_capital_gains_ils - summary.total_capital_losses_ils) + summary.total_income_ils)),
         (f"CGT Rate / שיעור מס רווחי הון", f"{int(ISRAEL_CGT_RATE * 100)}%"),
         ("CGT Owed (₪) / מס רווחי הון", _d(summary.cgt_owed_ils)),
-        (f"Surtax Rate (above 721,560 ₪) / מס על הכנסה גבוהה", f"{int(ISRAEL_SURTAX_RATE * 100)}%"),
+        (f"Surtax Rate (above 721,560 ₪) / מס על הכנסה גבוהה",
+         f"{int(ISRAEL_SURTAX_RATE * 100)}% (Section 121B(f); may be 5% per 121B(b) — consult CPA)"),
         ("Surtax Owed (₪) / מס נוסף", _d(summary.surtax_owed_ils)),
         ("", ""),
         ("TOTAL TAX OWED (₪) / סה״כ מס לתשלום", _d(summary.total_tax_owed_ils)),
@@ -201,8 +233,27 @@ def write_summary_section(
         ("Staking income", "Taxed as capital income (25%) at FMV on claim date"),
         ("Gas fees", "Tracked separately — consult accountant for deductibility treatment"),
         ("Active validators", "May owe marginal income tax instead of CGT — consult accountant"),
-        ("Form 1399", "File within 30 days of each disposal event and pay advance tax"),
-        ("Disclaimer", "This report is informational only. Consult a licensed Israeli CPA."),
+        ("Form 1399 / טופס 1399",
+         "File within 30 days of each disposal event and pay advance tax. "
+         "This tool does NOT track filing deadlines — the taxpayer is responsible."),
+        ("RECEIVE events",
+         "RECEIVE events are treated as cost-basis acquisitions at FMV. "
+         "If any represent airdrops, grants, or staking distributions, they must be "
+         "separately reported as income. Review each RECEIVE event manually."),
+        ("USD/ILS exchange rates",
+         "Sourced from Yahoo Finance market mid-rates (USDILS=X), not official Bank of "
+         "Israel published rates. Verify against boi.org.il before filing."),
+        ("Token prices",
+         "USD prices from DeFiLlama (daily snapshots); intraday volatility may cause "
+         "±1-2% variance from actual execution prices."),
+        ("Liquid staking (xSTRK)",
+         "Priced via on-chain vault exchange rate (interpolated between period start and "
+         "latest block). Small approximation error possible vs. exact block-level rate."),
+        ("Disclaimer / הצהרה",
+         "THIS REPORT IS NOT TAX ADVICE. It is a computational aid only. "
+         "All figures, classifications, and tax calculations must be reviewed and "
+         "approved by a licensed Israeli CPA (רו\"ח) before filing with the "
+         "Israel Tax Authority (רשות המסים)."),
     ]
 
     if summary.needs_manual_review:

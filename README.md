@@ -96,10 +96,25 @@ Run `starknet-tax --help` for the full inline help.
 
 Token prices are resolved in NIS using DeFiLlama (USD) × USD/ILS (Yahoo Finance). Stablecoins track USD/ILS. See `starknet_tax/pricing.py` for details.
 
+## Limitations & known approximations
+
+| Area | Detail |
+|------|--------|
+| **USD/ILS exchange rates** | Sourced from Yahoo Finance market mid-rates (`USDILS=X`), **not** official Bank of Israel published rates. For tax filing, verify against [boi.org.il](https://www.boi.org.il/en/economic-roles/financial-markets/exchange-rates/). |
+| **Token prices** | Daily snapshots from DeFiLlama. Intraday volatility may cause ±1–2 % variance from actual execution prices. |
+| **Liquid staking (xSTRK)** | On-chain vault rate is sampled at the **start** and **end** of the report period and linearly interpolated. Actual rate accrues staking rewards continuously (~8 %/yr), so intermediate dates carry a small approximation error. |
+| **RECEIVE events** | Incoming transfers are treated as cost-basis acquisitions at FMV. If any are airdrops, grants, or staking distributions, they are **unreported income** — verify each one manually. |
+| **Surtax rate** | Default is 3 % (Section 121B(f)). Some CPAs apply 5 % if crypto capital income falls under Section 121B(b). Consult your CPA. |
+| **Form 1399 deadlines** | The tool does **not** track the 30-day filing window. Each disposal must be reported on Form 1399 within 30 days — the taxpayer is responsible. |
+
 ## Legal disclaimer
 
-This tool is informational only. Israeli tax law is complex and subject to
-change. Consult a licensed Israeli CPA before filing.
+**This tool is NOT tax advice.** It is a computational aid only. Israeli tax
+law is complex, evolving, and depends on individual circumstances.
+
+All figures, classifications, and tax calculations produced by this tool **must
+be reviewed and approved by a licensed Israeli CPA (רו״ח)** before filing
+with the Israel Tax Authority (רשות המסים).
 
 Key filing requirement: **Form 1399 must be filed and advance tax paid within
 30 days of each disposal event** — not just at year end.
