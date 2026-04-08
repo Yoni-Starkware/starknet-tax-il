@@ -786,7 +786,6 @@ def fetch_transactions(
     address: str,
     from_date: date,
     to_date: date,
-    voyager_api_key: Optional[str],       # unused, kept for CLI compat
     rpc_url: Optional[str],
     delegation_pools: Optional[list[str]] = None,
     dune_api_key: Optional[str] = None,

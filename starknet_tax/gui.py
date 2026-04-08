@@ -116,7 +116,6 @@ def _run_report(
             address=address,
             from_date=from_d,
             to_date=to_d,
-            voyager_api_key=None,
             rpc_url=rpc_url,
             delegation_pools=None,
             dune_api_key=dune_api_key or None,

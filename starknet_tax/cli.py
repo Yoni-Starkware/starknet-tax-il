@@ -5,7 +5,7 @@ Usage:
   starknet-tax --address 0x04f8... --from-date 2024-01-01 --to-date 2024-12-31 --output report.csv
 
 Install:
-  pip install git+https://github.com/YOUR_USERNAME/starknet-tax-il
+  pip install git+https://github.com/Yoni-Starkware/starknet-tax-il
 """
 from __future__ import annotations
 
@@ -149,7 +149,6 @@ def main(
             address=address,
             from_date=from_d,
             to_date=to_d,
-            voyager_api_key=None,
             rpc_url=rpc_url,
             delegation_pools=list(delegation_pools) if delegation_pools else None,
             dune_api_key=dune_api_key,

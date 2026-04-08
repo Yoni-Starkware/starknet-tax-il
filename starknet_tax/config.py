@@ -134,8 +134,6 @@ POOL_MEMBER_EXIT_ACTION_SELECTOR = _sn_keccak("PoolMemberExitAction")
 
 # ── API endpoints ────────────────────────────────────────────────────────────
 
-VOYAGER_API_BASE = "https://api.voyager.online/beta"
-
 # Truly public RPC endpoints (no key required)
 PUBLIC_RPC_URLS = [
     "https://starknet-mainnet.public.blastapi.io",
