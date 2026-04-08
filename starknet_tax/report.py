@@ -232,6 +232,10 @@ def generate_report(
         writer.writerow([f"StarkNet Israeli Tax Report — {address}"])
         writer.writerow([f"Generated: {date.today().isoformat()}"])
         writer.writerow([f"Period: {from_date} to {to_date}"])
+        writer.writerow([
+            "Note: Section 1 (and disposal rows tied to it) include only transactions "
+            "dated within the period above. Full chain history still drives FIFO cost basis."
+        ])
 
         write_detail_section(writer, events)
         write_disposal_section(writer, events)

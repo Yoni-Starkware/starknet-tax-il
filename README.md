@@ -69,6 +69,8 @@ Outputs in the current directory:
 - `starknet_tax_<address prefix>_<year>.csv` — transaction detail, FIFO disposal detail, tax summary
 - `starknet_tax_<address prefix>_<year>_form1399.pdf` — when there are disposal events (otherwise skipped)
 
+The CSV **Section 1** rows are only transactions **dated inside** `--from-date` … `--to-date`. Dune still loads your full history so FIFO is correct; staking deposits/withdrawals outside the tax year won’t appear in the CSV even though they’re counted in Step 2’s classification totals.
+
 Optional: set a dedicated RPC (recommended for large histories):
 
 ```bash

@@ -65,6 +65,10 @@ def process_events(
     """
     Walk through events in chronological order, apply FIFO, and compute tax.
     Returns (processed_events, summary).
+
+    ``processed_events`` contains only events whose transaction **date** falls
+    within ``[from_date, to_date]`` — these are what the CSV report lists. All
+    ``events`` are still processed in chronological order for FIFO.
     """
     events_sorted = sorted(events, key=lambda e: e.timestamp)
     fifo = FIFOTracker()

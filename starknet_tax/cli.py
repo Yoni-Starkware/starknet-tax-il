@@ -162,6 +162,11 @@ def main(
     counts = Counter(e.event_type.value for e in events)
     for etype, count in sorted(counts.items()):
         click.echo(f"  {etype:<22} {count:>4}")
+    n_in_period = sum(1 for e in events if from_d <= e.timestamp.date() <= to_d)
+    click.echo(
+        f"  ── {n_in_period} of {len(events)} event(s) dated within the report period "
+        f"({from_d} … {to_d}). The CSV lists these only; other txs still affect FIFO."
+    )
 
     # Step 3: Price lookup
     click.echo("\nStep 3/4: Fetching ILS prices...")
