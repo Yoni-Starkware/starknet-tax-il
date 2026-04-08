@@ -2,15 +2,13 @@
 Historical ILS price lookup.
 
 Strategy:
-- Primary:  DeFiLlama (coins.llama.fi) — free, no API key, returns USD prices.
-            USD prices × USD/ILS rate = ILS price.
-- Fallback: CoinGecko — requires a free demo key (--coingecko-api-key).
-            Used only if DeFiLlama fails for a token.
+- DeFiLlama (coins.llama.fi) — free, no API key, returns USD prices.
+  USD prices × USD/ILS rate = ILS price.
 - Stablecoins (USDC, USDT, DAI): USD/ILS rate × 1.0 USD.
 - USD/ILS rates: Yahoo Finance (USDILS=X), fetched in a single range call and
   cached per-day.  Note: these are market mid-rates, not the official Bank of
   Israel published rates.  For highest accuracy, verify against boi.org.il.
-- Graceful fallback: if price unavailable, flag the event for manual review.
+- If DeFiLlama has no data for a token, the run fails with a clear error.
 """
 from __future__ import annotations
 
@@ -21,7 +19,7 @@ from typing import Optional
 
 import requests
 
-from .config import COINGECKO_API_BASE, COINGECKO_IDS, LIQUID_STAKING_SOURCES, STABLECOINS
+from .config import COINGECKO_IDS, LIQUID_STAKING_SOURCES, STABLECOINS
 
 DEFILLAMA_CHART_URL = "https://coins.llama.fi/chart/{coins}"
 
@@ -159,54 +157,6 @@ def _fetch_defillama_usd_batch(
     return {s: prices for s, prices in result.items() if prices}
 
 
-# ── CoinGecko (fallback, requires free demo key) ──────────────────────────────
-
-def _fetch_coingecko_ils(
-    symbol: str,
-    from_date: date,
-    to_date: date,
-    session: requests.Session,
-    api_key: str,
-) -> dict[date, Decimal]:
-    """Fetch ILS prices directly from CoinGecko (requires demo API key)."""
-    cg_id = COINGECKO_IDS.get(symbol)
-    if not cg_id:
-        return {}
-
-    from_ts = int(datetime(from_date.year, from_date.month, from_date.day,
-                           tzinfo=timezone.utc).timestamp())
-    to_ts   = int(datetime(to_date.year, to_date.month, to_date.day,
-                           23, 59, 59, tzinfo=timezone.utc).timestamp())
-
-    url     = f"{COINGECKO_API_BASE}/coins/{cg_id}/market_chart/range"
-    params  = {"vs_currency": "ils", "from": from_ts, "to": to_ts}
-    headers = {"x-cg-demo-api-key": api_key}
-
-    for attempt in range(3):
-        try:
-            resp = session.get(url, params=params, headers=headers, timeout=30)
-            if resp.status_code == 429:
-                wait = int(resp.headers.get("Retry-After", 60))
-                print(f"  CoinGecko rate limit — waiting {wait}s...")
-                time.sleep(wait)
-                continue
-            if resp.status_code == 401:
-                print(f"  CoinGecko 401 for {symbol} — check your API key.")
-                return {}
-            resp.raise_for_status()
-            result: dict[date, Decimal] = {}
-            for ts_ms, price in resp.json().get("prices", []):
-                d = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date()
-                result[d] = Decimal(str(price))
-            return result
-        except requests.RequestException as exc:
-            if attempt == 2:
-                print(f"  Warning: CoinGecko fetch failed for {symbol}: {exc}")
-                return {}
-            time.sleep(2 ** attempt)
-    return {}
-
-
 # ── Liquid staking on-chain rate ─────────────────────────────────────────────
 
 # Selector for ERC-4626 convert_to_assets(uint256 shares) → (uint256 assets)
@@ -282,10 +232,9 @@ class PriceCache:
       stablecoin:     Bank-of-Israel USD/ILS rate × 1.0
     """
 
-    def __init__(self, coingecko_api_key: Optional[str] = None, rpc_url: Optional[str] = None):
+    def __init__(self, rpc_url: Optional[str] = None):
         self._cache: dict[str, dict[date, Decimal]] = {}
         self._session = requests.Session()
-        self._cg_key  = coingecko_api_key
         self._rpc_url = rpc_url
 
     def warm_up(self, symbols: set[str], from_date: date, to_date: date) -> None:
@@ -339,24 +288,10 @@ class PriceCache:
             for symbol in needed:
                 usd_by_date = usd_prices.get(symbol, {})
                 if not usd_by_date:
-                    # Fallback to CoinGecko if key provided
-                    if self._cg_key:
-                        print(f"  {symbol}: no DeFiLlama data — trying CoinGecko...")
-                        ils = _fetch_coingecko_ils(
-                            symbol, from_date, effective_to, self._session, self._cg_key
-                        )
-                        if not ils:
-                            raise RuntimeError(
-                                f"Could not fetch price data for {symbol} from DeFiLlama or CoinGecko."
-                            )
-                        self._cache[symbol] = ils
-                        print(f"  {symbol}: {len(ils)} day(s) from CoinGecko.")
-                    else:
-                        raise RuntimeError(
-                            f"Could not fetch price data for {symbol} from DeFiLlama. "
-                            f"Pass --coingecko-api-key as a fallback."
-                        )
-                    continue
+                    raise RuntimeError(
+                        f"Could not fetch USD price data for {symbol} from DeFiLlama "
+                        f"for the requested date range. Check your connection or try again later."
+                    )
 
                 # Convert USD → ILS using BOI rates
                 ils: dict[date, Decimal] = {}

@@ -75,15 +75,6 @@ def _require_dune_key(
     ),
 )
 @click.option(
-    "--coingecko-api-key",
-    envvar="COINGECKO_API_KEY",
-    default=None,
-    help=(
-        "CoinGecko Demo API key (optional, for higher rate limits). "
-        "Get one free at https://www.coingecko.com/en/api"
-    ),
-)
-@click.option(
     "--dune-api-key",
     envvar="DUNE_API_KEY",
     default=None,
@@ -99,7 +90,6 @@ def main(
     to_date,
     output: str | None,
     rpc_url: str | None,
-    coingecko_api_key: str | None,
     dune_api_key: str,
 ) -> None:
     """
@@ -187,7 +177,7 @@ def main(
     price_from = min(all_event_dates) if all_event_dates else from_d
     price_to   = max(all_event_dates) if all_event_dates else to_d
 
-    prices = PriceCache(coingecko_api_key=coingecko_api_key, rpc_url=rpc_url)
+    prices = PriceCache(rpc_url=rpc_url)
     prices.warm_up(all_symbols, price_from, price_to)
 
     # Step 4: Tax calculation

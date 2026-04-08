@@ -85,13 +85,12 @@ export STARKNET_RPC_URL='https://starknet-mainnet.g.alchemy.com/starknet/version
 | `-o`, `--output` | Output CSV path (default: auto-named from address and year) |
 | `--dune-api-key` | **Required.** Dune API key, or set env **`DUNE_API_KEY`** |
 | `--rpc-url` | StarkNet JSON-RPC URL; env: **`STARKNET_RPC_URL`** (default: public Pathfinder mainnet) |
-| `--coingecko-api-key` | CoinGecko Demo API key for price fallback / rate limits; env: **`COINGECKO_API_KEY`** |
 
 Run `starknet-tax --help` for the full inline help.
 
 ### Pricing
 
-Token prices are resolved in NIS using DeFiLlama (USD) × USD/ILS (Yahoo Finance), with optional CoinGecko ILS fallback when `--coingecko-api-key` is set. Stablecoins track USD/ILS. See `starknet_tax/pricing.py` for details.
+Token prices are resolved in NIS using DeFiLlama (USD) × USD/ILS (Yahoo Finance). Stablecoins track USD/ILS. See `starknet_tax/pricing.py` for details.
 
 ## Legal disclaimer
 

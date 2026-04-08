@@ -77,7 +77,6 @@ def _run_report(
     to_d: date,
     rpc_url: str,
     dune_api_key: str,
-    coingecko_api_key: str | None,
     output_csv: str,
 ) -> None:
     """
@@ -142,7 +141,7 @@ def _run_report(
         price_from = min(all_event_dates) if all_event_dates else from_d
         price_to   = max(all_event_dates) if all_event_dates else to_d
 
-        prices = PriceCache(coingecko_api_key=coingecko_api_key or None, rpc_url=rpc_url)
+        prices = PriceCache(rpc_url=rpc_url)
         prices.warm_up(all_symbols, price_from, price_to)
 
         # Step 4: Tax
@@ -240,7 +239,6 @@ def _build_layout() -> list:
         [_label("To Date (YYYY-MM-DD) *"), _input("-TO-", today)],
         [_label("RPC URL"), _input("-RPC-", DEFAULT_RPC)],
         [_label("Dune API Key *"), _input("-DUNE-", password=True)],
-        [_label("CoinGecko API Key (opt.)"), _input("-COINGECKO-", password=True)],
         [_label("Output CSV path"), _input("-OUTPUT-", "starknet_tax_report.csv")],
     ]
 
@@ -360,7 +358,6 @@ def main() -> None:
             to_str = values["-TO-"].strip()
             rpc_url = values["-RPC-"].strip() or DEFAULT_RPC
             dune_key = values["-DUNE-"].strip()
-            cg_key = values["-COINGECKO-"].strip() or None
             output_csv = values["-OUTPUT-"].strip() or "starknet_tax_report.csv"
 
             # Validate
@@ -415,7 +412,6 @@ def main() -> None:
                     to_d=to_d,
                     rpc_url=rpc_url,
                     dune_api_key=dune_key,
-                    coingecko_api_key=cg_key,
                     output_csv=output_csv,
                 ),
                 daemon=True,

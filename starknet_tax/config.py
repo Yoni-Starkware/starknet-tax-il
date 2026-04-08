@@ -141,8 +141,6 @@ PUBLIC_RPC_URLS = [
     "https://rpc.starknet.lava.build",
 ]
 
-COINGECKO_API_BASE = "https://api.coingecko.com/api/v3"
-
 # ── Israeli tax constants ────────────────────────────────────────────────────
 
 ISRAEL_CGT_RATE = 0.25          # Standard capital-gains tax rate
