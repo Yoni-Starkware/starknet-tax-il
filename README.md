@@ -12,11 +12,18 @@ plus a supporting **Form 1399י-style PDF** for disposal events.
 |---|---|
 | DEX swaps (Ekubo, JediSwap, …) | Capital gain/loss on disposed token |
 | STRK native staking rewards | Income at FMV on claim date |
+| STRK staking deposit / withdrawal | Non-taxable lock-up / unlock (no gain/loss) |
 | Endur liquid staking (STRK ↔ xSTRK) | Taxable crypto-to-crypto exchange |
 | DeFi yield (zkLend, Nostra interest) | Income at FMV on receipt |
 | Airdrops / unknown inflows | Flagged — review manually |
 | Outgoing transfers | Treated as disposal (CGT) |
 | Gas fees | Tracked for deductibility |
+
+### Supported tokens
+
+ETH, STRK, xSTRK, USDC, USDCe (bridged USDC), USDT, DAI, WBTC, wstETH.
+
+To add a token, update `ADDRESS_TO_TOKEN` and `TOKEN_DECIMALS` in `starknet_tax/config.py`.
 
 ## Install
 
@@ -94,7 +101,13 @@ Run `starknet-tax --help` for the full inline help.
 
 ### Pricing
 
-Token prices are resolved in NIS using DeFiLlama (USD) × USD/ILS (Yahoo Finance). Stablecoins track USD/ILS. See `starknet_tax/pricing.py` for details.
+| Token type | Price source |
+|---|---|
+| Regular tokens (ETH, STRK, WBTC, wstETH) | DeFiLlama daily USD price × USD/ILS rate |
+| Stablecoins (USDC, USDCe, USDT, DAI) | 1.0 USD × USD/ILS rate |
+| Liquid staking (xSTRK) | STRK price × on-chain vault rate (interpolated between earliest-tx block and latest block) |
+
+USD/ILS exchange rates come from Yahoo Finance (`USDILS=X`). See `starknet_tax/pricing.py` for details.
 
 ## Limitations & known approximations
 
@@ -102,7 +115,7 @@ Token prices are resolved in NIS using DeFiLlama (USD) × USD/ILS (Yahoo Finance
 |------|--------|
 | **USD/ILS exchange rates** | Sourced from Yahoo Finance market mid-rates (`USDILS=X`), **not** official Bank of Israel published rates. For tax filing, verify against [boi.org.il](https://www.boi.org.il/en/economic-roles/financial-markets/exchange-rates/). |
 | **Token prices** | Daily snapshots from DeFiLlama. Intraday volatility may cause ±1–2 % variance from actual execution prices. |
-| **Liquid staking (xSTRK)** | On-chain vault rate is sampled at the **start** and **end** of the report period and linearly interpolated. Actual rate accrues staking rewards continuously (~8 %/yr), so intermediate dates carry a small approximation error. |
+| **Liquid staking (xSTRK)** | On-chain vault rate is sampled at the **earliest transaction block** and the **latest** block, then linearly interpolated. Actual rate accrues staking rewards continuously (~8 %/yr), so intermediate dates carry a small approximation error. |
 | **RECEIVE events** | Incoming transfers are treated as cost-basis acquisitions at FMV. If any are airdrops, grants, or staking distributions, they are **unreported income** — verify each one manually. |
 | **Surtax rate** | Default is 3 % (Section 121B(f)). Some CPAs apply 5 % if crypto capital income falls under Section 121B(b). Consult your CPA. |
 | **Form 1399 deadlines** | The tool does **not** track the 30-day filing window. Each disposal must be reported on Form 1399 within 30 days — the taxpayer is responsible. |

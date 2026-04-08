@@ -60,8 +60,8 @@ COINGECKO_IDS: dict[str, str] = {
 # Liquid staking tokens whose price is derived on-chain rather than from a price feed.
 # Format: symbol → (parent_symbol, vault_contract)
 # Price = parent_price × vault.convert_to_assets(1e18) / 1e18
-# The exchange rate is fetched once at the "latest" block and held constant across
-# the date range.  The rate drifts slowly with staking rewards (≤ ~10%/year).
+# The exchange rate is sampled at two points (earliest-tx block + latest block) and
+# linearly interpolated for intermediate dates.
 LIQUID_STAKING_SOURCES: dict[str, tuple[str, str]] = {
     "xSTRK": (
         "STRK",
