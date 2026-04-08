@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "starknet-tax-il"
+version = "0.1.0"
+description = "Israeli annual tax report generator for StarkNet wallet activity"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "click>=8.1",
+    "requests>=2.31",
+    "python-dateutil>=2.8",
+    "tqdm>=4.66",
+    "pycryptodome>=3.20",
+    "reportlab>=4.0",
+]
+
+[project.scripts]
+starknet-tax = "starknet_tax.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["starknet_tax*"]
