@@ -16,12 +16,28 @@ from pathlib import Path
 import click
 
 from .classifier import classify_all
-from .config import ADDRESS_TO_TOKEN, PUBLIC_RPC_URLS
+from .config import ADDRESS_TO_TOKEN
 from .fetcher import fetch_transactions
 from .form1399 import generate_form_1399
 from .pricing import PriceCache
 from .report import generate_report
 from .tax import process_events
+
+
+def _require_dune_key(
+    ctx: click.Context,
+    param: click.Parameter,
+    value: str | None,
+) -> str:
+    if value is None or not str(value).strip():
+        raise click.BadParameter(
+            "required — get a free API key at https://dune.com/settings/api "
+            "(sign in → profile menu → Settings → API), then set DUNE_API_KEY "
+            "or pass --dune-api-key.",
+            ctx=ctx,
+            param=param,
+        )
+    return str(value).strip()
 
 
 @click.command()
@@ -59,17 +75,6 @@ from .tax import process_events
     ),
 )
 @click.option(
-    "--delegation-pool",
-    "delegation_pools",
-    multiple=True,
-    help=(
-        "Delegation pool contract address (0x...) for STRK staking rewards. "
-        "Repeat for multiple pools. If not provided, pool contracts are auto-discovered "
-        "from the staking contract events (may not find all pools). "
-        "Find your pool at https://starknet.io/staking/"
-    ),
-)
-@click.option(
     "--coingecko-api-key",
     envvar="COINGECKO_API_KEY",
     default=None,
@@ -82,10 +87,10 @@ from .tax import process_events
     "--dune-api-key",
     envvar="DUNE_API_KEY",
     default=None,
+    callback=_require_dune_key,
     help=(
-        "Dune Analytics API key. When provided, fetches the full ALL-TIME "
-        "transaction history from Dune so that FIFO cost basis is complete. "
-        "Get a free key at https://dune.com/settings/api"
+        "Dune Analytics API key (required). Fetches full transaction history for "
+        "correct FIFO. Free: https://dune.com/settings/api — or set DUNE_API_KEY."
     ),
 )
 def main(
@@ -94,9 +99,8 @@ def main(
     to_date,
     output: str | None,
     rpc_url: str | None,
-    delegation_pools: tuple,
     coingecko_api_key: str | None,
-    dune_api_key: str | None,
+    dune_api_key: str,
 ) -> None:
     """
     Generate an Israeli tax report for a StarkNet wallet.
@@ -108,6 +112,7 @@ def main(
 
     \b
     Example:
+      export DUNE_API_KEY=...   # free key from https://dune.com/settings/api
       starknet-tax \\
         --address 0x04f8f5... \\
         --from-date 2024-01-01 \\
@@ -138,19 +143,15 @@ def main(
         click.echo(f"  {symbol:<8}  {addr}")
     click.echo("")
 
-    # Step 1: Fetch transactions
-    if dune_api_key:
-        click.echo("Step 1/4: Fetching ALL-TIME transactions via Dune Analytics...")
-        click.echo("  (Full history ensures correct FIFO cost basis for all disposals)")
-    else:
-        click.echo("Step 1/4: Fetching transactions via RPC...")
+    # Step 1: Fetch transactions (Dune discovers hashes; RPC loads receipts)
+    click.echo("Step 1/4: Fetching ALL-TIME transaction list via Dune Analytics...")
+    click.echo("  (RPC is used to load receipts; full history ensures correct FIFO)")
     try:
         transactions = fetch_transactions(
             address=address,
             from_date=from_d,
             to_date=to_d,
             rpc_url=rpc_url,
-            delegation_pools=list(delegation_pools) if delegation_pools else None,
             dune_api_key=dune_api_key,
         )
     except PermissionError as e:

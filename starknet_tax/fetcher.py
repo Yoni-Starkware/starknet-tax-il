@@ -1,27 +1,18 @@
 """
-Fetch transaction history via StarkNet JSON-RPC (Alchemy, Blast, Nethermind, etc.)
+Fetch transaction history: Dune Analytics discovers tx hashes, JSON-RPC loads receipts.
 
 Strategy:
-  1. Date → block number: pure binary search (~23 RPC calls, O(log N)).
-  2. Account event scan: starknet_getEvents with address=USER_ADDRESS returns all
-     events emitted by the account contract (Argent, Braavos, OZ all emit at least
-     one event per executed transaction).  This correctly discovers every user-
-     initiated transaction regardless of which token or protocol is used.
-     NOTE: Key-based filtering (key[1]/key[2] = user address) is NOT used because
-     most StarkNet ERC-20 tokens (STRK, USDC, USDT, etc.) use the legacy Cairo-0
-     Transfer event encoding where from/to addresses are in event data, not keys.
-  3. Staking contract: additionally scanned for PoolMemberRewardClaimed /
-     StakerRewardClaimed in case rewards are auto-claimed by a third party rather
-     than by the user themselves.
-  4. All unique tx hashes → starknet_getTransactionReceipt → parse all events.
-     Both Cairo-0 (addresses in data) and Cairo-1 (addresses in keys) Transfer
-     event formats are supported in the receipt parsing step.
+  1. Dune SQL (requires API key) returns the union of user-initiated txs and
+     transfers on known token contracts — full wallet history for correct FIFO.
+  2. For each hash, starknet_getTransactionReceipt parses all events.
+     Cairo-0 (addresses in data) and Cairo-1 (addresses in keys) Transfer
+     formats are supported.
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -31,18 +22,10 @@ from tqdm import tqdm
 from .config import (
     ADDRESS_TO_TOKEN,
     IGNORED_TOKEN_CONTRACTS,
-    POOL_MEMBER_EXIT_ACTION_SELECTOR,
-    POOL_MEMBER_REWARD_CLAIMED_SELECTOR,
-    STAKER_REWARD_CLAIMED_SELECTOR,
     PUBLIC_RPC_URLS,
-    STAKING_CONTRACT,
     TOKEN_DECIMALS,
     TRANSFER_SELECTOR,
-    _sn_keccak,
 )
-
-# All known tokens (for Transfer event parsing in receipts)
-ETH_CONTRACT = "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7"
 
 # StarkNet sequencer fee vault — every transaction ends with a Transfer of
 # fee_token from the user to this address.  We skip it when building tokens_out
@@ -151,28 +134,6 @@ class RpcClient:
             {"transaction_hash": tx_hash},
         ) or {}
 
-    def get_events(
-        self,
-        from_block: int,
-        to_block: int,
-        address: Optional[str],
-        keys: list[list[str]],
-        chunk_size: int = 1000,
-        continuation_token: Optional[str] = None,
-    ) -> dict:
-        f: dict = {
-            "from_block": {"block_number": from_block},
-            "to_block": {"block_number": to_block},
-            "chunk_size": chunk_size,
-        }
-        if keys:
-            f["keys"] = keys
-        if address:
-            f["address"] = address
-        if continuation_token:
-            f["continuation_token"] = continuation_token
-        return self._call("starknet_getEvents", {"filter": f}, timeout=60) or {}
-
 
 def _pick_rpc(override: Optional[str]) -> RpcClient:
     urls = [override] if override else PUBLIC_RPC_URLS
@@ -190,259 +151,10 @@ def _pick_rpc(override: Optional[str]) -> RpcClient:
     )
 
 
-# ── Date → block conversion ───────────────────────────────────────────────────
+# ── Block timestamps (for receipt parsing) ─────────────────────────────────────
 
 def _block_ts(rpc: RpcClient, block_number: int) -> int:
     return rpc.get_block(block_number).get("timestamp", 0)
-
-
-def _find_block_for_date(rpc: RpcClient, target: date, latest_block: int) -> int:
-    """
-    Binary search for the first block whose timestamp >= midnight of target date.
-    Uses ~23 RPC calls (log2 of StarkNet's block count).
-    """
-    target_ts = int(
-        datetime(target.year, target.month, target.day, tzinfo=timezone.utc).timestamp()
-    )
-    latest_ts = _block_ts(rpc, latest_block)
-    if latest_ts <= target_ts:
-        return latest_block
-
-    lo, hi = 0, latest_block
-    while lo < hi:
-        mid = (lo + hi) // 2
-        if _block_ts(rpc, mid) < target_ts:
-            lo = mid + 1
-        else:
-            hi = mid
-    return lo
-
-
-# ── Event scanning ────────────────────────────────────────────────────────────
-
-def _drain_events(
-    rpc: RpcClient,
-    from_block: int,
-    to_block: int,
-    address: Optional[str],
-    keys: list[list[str]],
-    label: str = "",
-) -> list[dict]:
-    """
-    Collect all events matching the filter over the full block range.
-    Follows continuation tokens until exhausted.
-    Prints a one-line progress update for visibility.
-    """
-    events: list[dict] = []
-    continuation = None
-    pages = 0
-    t0 = time.time()
-    while True:
-        result = rpc.get_events(from_block, to_block, address, keys,
-                                chunk_size=1000, continuation_token=continuation)
-        batch = result.get("events", [])
-        events.extend(batch)
-        continuation = result.get("continuation_token")
-        pages += 1
-        if not continuation:
-            break
-        time.sleep(0.05)
-    elapsed = time.time() - t0
-    if events or pages > 2:
-        tqdm.write(f"    {label}: {len(events)} events in {pages} pages ({elapsed:.1f}s)")
-    return events
-
-
-def _get_user_tx_hashes(
-    rpc: RpcClient,
-    user_addr: str,
-    from_block: int,
-    to_block: int,
-) -> set[str]:
-    """
-    Find all transactions initiated by the user by scanning events emitted
-    BY the account contract itself.
-
-    Every account contract (Argent X, Braavos, OpenZeppelin) emits at least
-    one event per executed transaction, so this discovers all transactions
-    where the user was the sender.
-
-    NOTE: this does NOT discover transactions initiated by a third party that
-    spent an allowance you granted (e.g. a DEX pulling tokens via transferFrom).
-    Those are caught separately by _scan_token_transfers(), which scans Transfer
-    events and finds any tx where the user's address appears as from/to.
-    """
-    events = _drain_events(
-        rpc, from_block, to_block,
-        address=user_addr,
-        keys=[],   # no key filter — collect ALL events from this contract
-        label="account-txs",
-    )
-    tx_hashes = {ev["transaction_hash"] for ev in events}
-    return tx_hashes
-
-
-def _scan_token_transfers(
-    rpc: RpcClient,
-    user_addr: str,
-    from_block: int,
-    to_block: int,
-) -> set[str]:
-    """
-    Find tx hashes where the user appears in a Transfer event from any known token
-    contract.  Fallback for wallets whose account contracts do not emit per-tx
-    events (OZ accounts, older Braavos/Argent versions).
-
-    Encoding is detected dynamically per token by sampling one event:
-    - Cairo-1 (keys = [selector, from, to]): RPC-side key filter — O(user events).
-    - Cairo-0 (keys = [selector], data = [from, to, ...]): full scan with
-      client-side matching.  No sleep between pages; RpcClient retries on 429.
-      Progress is printed every 20 pages.
-    If a token has no Transfer events in the block range it is skipped entirely.
-    """
-    tx_hashes: set[str] = set()
-
-    for token_contract, symbol in ADDRESS_TO_TOKEN.items():
-        t0 = time.time()
-
-        # ── Detect encoding via one-event sample ────────────────────────────
-        sample = rpc.get_events(from_block, to_block, token_contract,
-                                [[TRANSFER_SELECTOR]], chunk_size=1)
-        sample_events = sample.get("events", [])
-
-        if not sample_events:
-            tqdm.write(f"  {symbol}: no transfers in period, skipping")
-            continue
-
-        is_cairo1 = len(sample_events[0].get("keys", [])) >= 3
-
-        if is_cairo1:
-            # ── Cairo-1: key-filtered scan — only fetches the user's own events
-            found: set[str] = set()
-            for filt in [
-                [[TRANSFER_SELECTOR], [user_addr]],       # keys[1] = from (outgoing)
-                [[TRANSFER_SELECTOR], [], [user_addr]],   # keys[2] = to   (incoming)
-            ]:
-                for ev in _drain_events(rpc, from_block, to_block, token_contract,
-                                        filt, label=f"{symbol}"):
-                    found.add(ev["transaction_hash"])
-            elapsed = time.time() - t0
-            tqdm.write(f"  {symbol}: {len(found)} tx(s) via key filter (Cairo-1, {elapsed:.1f}s)")
-
-        else:
-            # ── Cairo-0: scan ALL Transfer events, match user address in data
-            tqdm.write(f"  {symbol}: scanning all transfers (Cairo-0, from/to in data)...")
-            found = set()
-            continuation: Optional[str] = None
-            pages = 0
-            total_events = 0
-            while True:
-                result = rpc.get_events(
-                    from_block, to_block,
-                    address=token_contract,
-                    keys=[[TRANSFER_SELECTOR]],
-                    chunk_size=1000,
-                    continuation_token=continuation,
-                )
-                batch = result.get("events", [])
-                continuation = result.get("continuation_token")
-                pages += 1
-                total_events += len(batch)
-
-                for ev in batch:
-                    data = ev.get("data", [])
-                    if len(data) >= 2 and (
-                        _norm(data[0]) == user_addr or _norm(data[1]) == user_addr
-                    ):
-                        found.add(ev["transaction_hash"])
-
-                if pages % 20 == 0:
-                    elapsed = time.time() - t0
-                    tqdm.write(
-                        f"    {symbol}: page {pages} | {total_events:,} events scanned"
-                        f" | {len(found)} matching ({elapsed:.0f}s)..."
-                    )
-
-                if not continuation:
-                    break
-
-            elapsed = time.time() - t0
-            tqdm.write(
-                f"  {symbol}: {len(found)} tx(s) found"
-                f" ({total_events:,} events, {pages} pages, {elapsed:.1f}s)"
-            )
-
-        tx_hashes |= found
-
-    return tx_hashes
-
-
-def _scan_staking(
-    rpc: RpcClient,
-    user_addr: str,
-    from_block: int,
-    to_block: int,
-    extra_pool_contracts: Optional[list[str]] = None,
-) -> set[str]:
-    """
-    Return tx hashes of staking reward events for this user.
-
-    Covers two roles:
-    - Validator: StakerRewardClaimed on the main staking contract
-    - Delegator: PoolMemberRewardClaimed on each delegation pool contract.
-      Delegation pools are discovered by scanning the staking contract for
-      PoolMemberStakeChanged events that reference the user, then scanning
-      the resulting pool contracts.  Any extra pool addresses can be passed
-      via extra_pool_contracts.
-    """
-    tx_hashes: set[str] = set()
-
-    # 1. Validator rewards on the main staking contract
-    events = _drain_events(rpc, from_block, to_block, STAKING_CONTRACT,
-                           [[STAKER_REWARD_CLAIMED_SELECTOR]], "validator-rewards")
-    for ev in events:
-        vals = [_norm(v) for v in (ev.get("keys", [])[1:] + ev.get("data", []))]
-        if user_addr in vals:
-            tx_hashes.add(ev["transaction_hash"])
-
-    # 2. Discover delegation pool contracts for this user.
-    #    The staking contract emits events when pool member stake changes.
-    #    We scan for any staking event that includes the user's address.
-    POOL_MEMBER_SELECTORS = [
-        POOL_MEMBER_REWARD_CLAIMED_SELECTOR,
-        _sn_keccak("PoolMemberStakeChanged"),
-        POOL_MEMBER_EXIT_ACTION_SELECTOR,
-    ]
-    pool_contracts: set[str] = set()
-
-    # Scan all staking-contract events for any mention of the user (in any position)
-    for selector in POOL_MEMBER_SELECTORS:
-        events = _drain_events(rpc, from_block, to_block, STAKING_CONTRACT,
-                               [[selector]], f"pool-discovery")
-        for ev in events:
-            vals = [_norm(v) for v in (ev.get("keys", [])[1:] + ev.get("data", []))]
-            if user_addr in vals:
-                # The event data usually includes the pool address — collect all addresses
-                for v in vals:
-                    if v and v != user_addr and len(v) > 10:
-                        pool_contracts.add(v)
-
-    if extra_pool_contracts:
-        pool_contracts.update(_norm(p) for p in extra_pool_contracts)
-
-    # 3. Scan discovered pool contracts for PoolMemberRewardClaimed
-    if pool_contracts:
-        print(f"  Found {len(pool_contracts)} delegation pool contract(s) — scanning rewards...")
-        for pool_addr in pool_contracts:
-            events = _drain_events(rpc, from_block, to_block, pool_addr,
-                                   [[POOL_MEMBER_REWARD_CLAIMED_SELECTOR]],
-                                   f"pool-rewards({pool_addr[:10]}...)")
-            for ev in events:
-                vals = [_norm(v) for v in (ev.get("keys", [])[1:] + ev.get("data", []))]
-                if user_addr in vals:
-                    tx_hashes.add(ev["transaction_hash"])
-
-    return tx_hashes
 
 
 # ── Transfer event parsing ────────────────────────────────────────────────────
@@ -697,10 +409,9 @@ def _fetch_and_parse_receipts(
     """
     Fetch the receipt for every tx hash, parse token flows and fees.
 
-    When skip_date_filter=True (CSV/Dune modes) all transactions are returned
-    regardless of date so that process_events() can build a complete FIFO
-    history.  When False (RPC mode) only transactions within [from_date,
-    to_date] are returned (block binary-search may slightly overshoot).
+    When skip_date_filter=True (Dune: full history) all transactions are
+    returned regardless of date so process_events() can build a complete FIFO
+    history. When False, only transactions within [from_date, to_date] are kept.
     """
     print(f"\nFetching {len(tx_hashes)} transaction receipt(s)...")
 
@@ -725,7 +436,7 @@ def _fetch_and_parse_receipts(
         timestamp = datetime.fromtimestamp(ts_unix, tz=timezone.utc)
 
         if not skip_date_filter and not (from_date <= timestamp.date() <= to_date):
-            continue  # RPC binary search may slightly overshoot; skip out-of-range
+            continue
 
         events = receipt.get("events", [])
 
@@ -787,74 +498,24 @@ def fetch_transactions(
     from_date: date,
     to_date: date,
     rpc_url: Optional[str],
-    delegation_pools: Optional[list[str]] = None,
-    dune_api_key: Optional[str] = None,
+    dune_api_key: str,
 ) -> list[ParsedTransaction]:
     """
     Fetch and parse all transactions for `address`.
 
-    Two discovery modes:
-    - Dune mode (dune_api_key is set): fetches ALL-TIME tx hashes via Dune
-      Analytics SQL, then fetches receipts via RPC.  No date filter on the
-      returned transactions — process_events() gates the tax summary to
-      [from_date, to_date] while still running FIFO over full history.
-    - RPC mode (default): discovers txs via account-contract event scanning,
-      token Transfer scanning, and staking contract scanning within
-      [from_date, to_date] only.
+    Tx hashes come from Dune Analytics (all-time). Receipts are loaded via RPC.
+    No date filter on returned transactions — process_events() limits the tax
+    summary to [from_date, to_date] while FIFO runs over full history.
     """
     norm_addr = _norm(address)
     rpc = _pick_rpc(rpc_url)
 
-    if dune_api_key:
-        # ── Dune mode — full history, no date filter ──────────────────────────
-        print(f"Fetching all-time transactions from Dune Analytics for {address[:14]}...")
-        tx_hashes: set[str] = fetch_tx_hashes_from_dune(address, dune_api_key)
-        return _fetch_and_parse_receipts(
-            rpc, norm_addr, tx_hashes, from_date, to_date, skip_date_filter=True
-        )
-
-    else:
-        # ── RPC mode ─────────────────────────────────────────────────────────
-
-        # Step 1: date → block range
-        print("Finding block range for the given dates (binary search)...")
-        latest = rpc.block_number()
-        from_block = _find_block_for_date(rpc, from_date, latest)
-        to_block   = min(_find_block_for_date(rpc, to_date + timedelta(days=1), latest), latest)
-
-        from_ts_dt = datetime.fromtimestamp(_block_ts(rpc, from_block), tz=timezone.utc)
-        to_ts_dt   = datetime.fromtimestamp(_block_ts(rpc, to_block),   tz=timezone.utc)
-        print(f"  Block {from_block:,} ({from_ts_dt.date()})  →  Block {to_block:,} ({to_ts_dt.date()})")
-
-        # Step 2a: account-contract events (Argent X, newer Braavos)
-        print("\nScanning account contract events to discover transactions...")
-        tx_hashes = _get_user_tx_hashes(rpc, norm_addr, from_block, to_block)
-        print(f"  → {len(tx_hashes)} transaction(s) found via account events.")
-
-        # Step 2b: token Transfer events (fallback for OZ / older wallets)
-        print("\nScanning token Transfer events to find any missed transactions...")
-        transfer_found = _scan_token_transfers(rpc, norm_addr, from_block, to_block)
-        new_from_transfers = transfer_found - tx_hashes
-        if new_from_transfers:
-            print(f"  → {len(new_from_transfers)} additional transaction(s) found via token transfers.")
-        tx_hashes |= transfer_found
-
-        # Step 3: staking reward events (catches third-party auto-claims)
-        print("\nScanning staking reward events...")
-        staking_found = _scan_staking(rpc, norm_addr, from_block, to_block,
-                                      extra_pool_contracts=delegation_pools)
-        if staking_found:
-            print(f"  → {len(staking_found)} additional staking reward transaction(s).")
-        tx_hashes |= staking_found
-
-        print(
-            f"\nNote: incoming transfers sent directly to your address by third parties "
-            f"(airdrops, direct sends) are not automatically discovered. "
-            f"Token flows within your own transactions are fully captured."
-        )
-
+    print(f"Fetching all-time transactions from Dune Analytics for {address[:14]}...")
+    tx_hashes: set[str] = fetch_tx_hashes_from_dune(address, dune_api_key)
     if not tx_hashes:
-        print("No transactions found for this address in the given period.")
+        print("No transactions found for this address in Dune.")
         return []
 
-    return _fetch_and_parse_receipts(rpc, norm_addr, tx_hashes, from_date, to_date)
+    return _fetch_and_parse_receipts(
+        rpc, norm_addr, tx_hashes, from_date, to_date, skip_date_filter=True
+    )

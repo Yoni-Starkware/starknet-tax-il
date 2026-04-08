@@ -21,7 +21,7 @@ from pathlib import Path
 import FreeSimpleGUI as sg
 
 from .classifier import classify_all
-from .config import ADDRESS_TO_TOKEN, PUBLIC_RPC_URLS
+from .config import ADDRESS_TO_TOKEN
 from .fetcher import fetch_transactions
 from .form1399 import generate_form_1399
 from .pricing import PriceCache
@@ -76,7 +76,7 @@ def _run_report(
     from_d: date,
     to_d: date,
     rpc_url: str,
-    dune_api_key: str | None,
+    dune_api_key: str,
     coingecko_api_key: str | None,
     output_csv: str,
 ) -> None:
@@ -105,20 +105,15 @@ def _run_report(
             print(f"  {symbol:<8}  {addr}")
         print("")
 
-        # Step 1: Fetch
-        if dune_api_key:
-            print("Step 1/4: Fetching ALL-TIME transactions via Dune Analytics...")
-            print("  (Full history ensures correct FIFO cost basis for all disposals)")
-        else:
-            print("Step 1/4: Fetching transactions via RPC...")
+        print("Step 1/4: Fetching ALL-TIME transaction list via Dune Analytics...")
+        print("  (RPC loads receipts; full history ensures correct FIFO)")
 
         transactions = fetch_transactions(
             address=address,
             from_date=from_d,
             to_date=to_d,
             rpc_url=rpc_url,
-            delegation_pools=None,
-            dune_api_key=dune_api_key or None,
+            dune_api_key=dune_api_key,
         )
 
         if not transactions:
@@ -244,7 +239,7 @@ def _build_layout() -> list:
         [_label("From Date (YYYY-MM-DD) *"), _input("-FROM-", year_start)],
         [_label("To Date (YYYY-MM-DD) *"), _input("-TO-", today)],
         [_label("RPC URL"), _input("-RPC-", DEFAULT_RPC)],
-        [_label("Dune API Key (optional)"), _input("-DUNE-", password=True)],
+        [_label("Dune API Key *"), _input("-DUNE-", password=True)],
         [_label("CoinGecko API Key (opt.)"), _input("-COINGECKO-", password=True)],
         [_label("Output CSV path"), _input("-OUTPUT-", "starknet_tax_report.csv")],
     ]
@@ -364,7 +359,7 @@ def main() -> None:
             from_str = values["-FROM-"].strip()
             to_str = values["-TO-"].strip()
             rpc_url = values["-RPC-"].strip() or DEFAULT_RPC
-            dune_key = values["-DUNE-"].strip() or None
+            dune_key = values["-DUNE-"].strip()
             cg_key = values["-COINGECKO-"].strip() or None
             output_csv = values["-OUTPUT-"].strip() or "starknet_tax_report.csv"
 
@@ -372,6 +367,10 @@ def main() -> None:
             errors: list[str] = []
             if not address:
                 errors.append("Wallet Address is required.")
+            if not dune_key:
+                errors.append(
+                    "Dune API Key is required (free: dune.com → sign in → Settings → API)."
+                )
             try:
                 from_d = datetime.strptime(from_str, "%Y-%m-%d").date()
             except ValueError:

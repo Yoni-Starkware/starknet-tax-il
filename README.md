@@ -26,18 +26,38 @@ pip install git+https://github.com/Yoni-Starkware/starknet-tax-il
 
 Requires Python 3.9+.
 
-## How transaction history is fetched
+## Dune API key (required)
 
-The tool talks to StarkNet over **JSON-RPC** (for block lookup and transaction receipts).
+Transaction discovery uses **Dune Analytics** so your **full on-chain history** is included. That keeps **FIFO cost basis** correct when you bought or received tokens before the tax year and dispose of them later. RPC-only scanning of a date range was slow, incomplete, and easy to get wrong—so this tool **requires** a Dune key.
 
-- **Default (no Dune):** It discovers transactions in the **report period only** (`--from-date` … `--to-date`) by scanning your account’s events, token `Transfer` events, and staking-related events. Use this when your cost basis does not depend on activity before that window, or when you only need a quick picture of the year.
-- **With `--dune-api-key`:** It loads the **full all-time** transaction list from **Dune Analytics**, then still pulls each receipt via RPC. The tax **summary** is still limited to your chosen dates, but **FIFO cost basis** is built over complete history—important if you acquired tokens before the report year and sell or swap during it.
+**How to get a free API key**
 
-Get a free Dune API key at [dune.com/settings/api](https://dune.com/settings/api).
+1. Create a free account at [dune.com](https://dune.com) (sign in with GitHub/Google/email).
+2. Open **[Settings → API](https://dune.com/settings/api)** (or: profile menu → **Settings** → **API**).
+3. Create an API key and copy it.
+
+Then either:
+
+```bash
+export DUNE_API_KEY='paste_your_key_here'
+```
+
+or pass **`--dune-api-key`** on each run.
+
+Free tier is enough for typical use; heavy wallets may hit rate limits—see Dune’s docs for quotas.
+
+## How data is fetched
+
+1. **Dune** runs a query that returns **all transaction hashes** relevant to your wallet (user txs plus transfers on known token contracts).
+2. **StarkNet JSON-RPC** loads each **transaction receipt** (token flows, fees). Use a reliable RPC—your own [Alchemy](https://www.alchemy.com/) endpoint is recommended for speed and limits.
+
+The **report period** (`--from-date` … `--to-date`) still controls what appears in the **tax summary**; events outside that window are used only for FIFO inventory.
 
 ## Quick start
 
 ```bash
+export DUNE_API_KEY='...'   # from https://dune.com/settings/api
+
 starknet-tax \
   --address 0x04f8f5... \
   --from-date 2024-01-01 \
@@ -46,24 +66,13 @@ starknet-tax \
 
 Outputs in the current directory:
 
-- `starknet_tax_<address prefix>_<year>.csv` — three sections: transaction detail, FIFO disposal detail, tax summary
-- `starknet_tax_<address prefix>_<year>_form1399.pdf` — generated when there are disposal events (otherwise skipped)
+- `starknet_tax_<address prefix>_<year>.csv` — transaction detail, FIFO disposal detail, tax summary
+- `starknet_tax_<address prefix>_<year>_form1399.pdf` — when there are disposal events (otherwise skipped)
 
-For heavier wallets or rate limits, pass your own RPC (e.g. Alchemy):
+Optional: set a dedicated RPC (recommended for large histories):
 
 ```bash
 export STARKNET_RPC_URL='https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_10/YOUR_KEY'
-starknet-tax -a 0x... -f 2024-01-01 -t 2024-12-31
-```
-
-### Full FIFO across all prior years
-
-```bash
-starknet-tax \
-  -a 0x04f8f5... \
-  -f 2024-01-01 \
-  -t 2024-12-31 \
-  --dune-api-key YOUR_DUNE_KEY
 ```
 
 ### CLI options
@@ -74,10 +83,9 @@ starknet-tax \
 | `-f`, `--from-date` | Start date `YYYY-MM-DD`, inclusive (required) |
 | `-t`, `--to-date` | End date `YYYY-MM-DD`, inclusive (required) |
 | `-o`, `--output` | Output CSV path (default: auto-named from address and year) |
-| `--rpc-url` | StarkNet JSON-RPC URL; env: `STARKNET_RPC_URL` (default: public Pathfinder mainnet) |
-| `--delegation-pool` | STRK delegation pool address; repeat for multiple pools (optional; pools are also auto-discovered when possible) |
-| `--coingecko-api-key` | CoinGecko Demo API key for price fallback / rate limits; env: `COINGECKO_API_KEY` |
-| `--dune-api-key` | Dune API key for all-time tx discovery; env: `DUNE_API_KEY` |
+| `--dune-api-key` | **Required.** Dune API key, or set env **`DUNE_API_KEY`** |
+| `--rpc-url` | StarkNet JSON-RPC URL; env: **`STARKNET_RPC_URL`** (default: public Pathfinder mainnet) |
+| `--coingecko-api-key` | CoinGecko Demo API key for price fallback / rate limits; env: **`COINGECKO_API_KEY`** |
 
 Run `starknet-tax --help` for the full inline help.
 
