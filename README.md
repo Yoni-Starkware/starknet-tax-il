@@ -46,6 +46,8 @@ or pass **`--dune-api-key`** on each run.
 
 Free tier is enough for typical use; heavy wallets may hit rate limits—see Dune’s docs for quotas.
 
+Query runs use Dune’s **`medium`** performance tier by default. For heavier SQL, set **`DUNE_PERFORMANCE=large`** (may require credits on your Dune plan).
+
 ## How data is fetched
 
 1. **Dune** runs a query that returns **all transaction hashes** relevant to your wallet (user txs plus transfers on known token contracts).

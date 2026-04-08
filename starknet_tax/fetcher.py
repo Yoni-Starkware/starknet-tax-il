@@ -10,6 +10,7 @@ Strategy:
 """
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -273,6 +274,23 @@ def _assert_no_unknown_transfers(
 _DUNE_API_BASE = "https://api.dune.com/api/v1"
 
 
+def _dune_performance_tier() -> str:
+    """medium (default) or large — must be sent as a query param, not JSON body."""
+    tier = os.environ.get("DUNE_PERFORMANCE", "medium").strip().lower()
+    return tier if tier in ("medium", "large") else "medium"
+
+
+def _dune_raise(resp: requests.Response, what: str) -> None:
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = (resp.text or "")[:800]
+        raise RuntimeError(f"Dune API error ({what}): HTTP {resp.status_code} — {detail}") from e
+
+
 def fetch_tx_hashes_from_dune(address: str, api_key: str) -> set[str]:
     """
     Fetch ALL transaction hashes involving this StarkNet address via Dune Analytics.
@@ -336,18 +354,19 @@ WHERE from_address IN ({contracts_hex})
         raise PermissionError(
             "Dune API key rejected (401). Check --dune-api-key / DUNE_API_KEY."
         )
-    resp.raise_for_status()
+    _dune_raise(resp, "create query")
     query_id = resp.json()["query_id"]
     print(f"  Query created: {query_id}")
 
-    # Step 2: Execute the query
+    # Step 2: Execute — performance is a *query* parameter (see Dune OpenAPI), not JSON body.
+    perf = _dune_performance_tier()
     resp = session.post(
         f"{_DUNE_API_BASE}/query/{query_id}/execute",
         headers=headers,
-        json={"performance": "large"},
+        params={"performance": perf},
         timeout=30,
     )
-    resp.raise_for_status()
+    _dune_raise(resp, "execute query")
     execution_id = resp.json()["execution_id"]
     print(f"  Execution started: {execution_id}")
 
