@@ -84,6 +84,16 @@ def _require_dune_key(
         "correct FIFO. Free: https://dune.com/settings/api — or set DUNE_API_KEY."
     ),
 )
+@click.option(
+    "--ignore-unknown-tokens",
+    is_flag=True,
+    default=False,
+    help=(
+        "Omit ERC-20 Transfer events from token contracts not listed in "
+        "config.py instead of aborting. May produce incomplete FIFO/tax figures; "
+        "prefer adding tokens to ADDRESS_TO_TOKEN or IGNORED_TOKEN_CONTRACTS."
+    ),
+)
 def main(
     address: str,
     from_date,
@@ -91,6 +101,7 @@ def main(
     output: str | None,
     rpc_url: str | None,
     dune_api_key: str,
+    ignore_unknown_tokens: bool,
 ) -> None:
     """
     Generate an Israeli tax report for a StarkNet wallet.
@@ -143,6 +154,7 @@ def main(
             to_date=to_d,
             rpc_url=rpc_url,
             dune_api_key=dune_api_key,
+            ignore_unknown_tokens=ignore_unknown_tokens,
         )
     except PermissionError as e:
         click.echo(f"\n{e}", err=True)

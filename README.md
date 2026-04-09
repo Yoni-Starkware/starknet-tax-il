@@ -73,10 +73,12 @@ starknet-tax \
   --to-date 2024-12-31
 ```
 
-Outputs in the current directory:
+Each run writes **two** paths (by default, in the current directory):
 
-- `starknet_tax_<address prefix>_<year>.csv` — transaction detail, FIFO disposal detail, tax summary
-- `starknet_tax_<address prefix>_<year>_form1399.pdf` — when there are disposal events (otherwise skipped)
+- **CSV** — `starknet_tax_<address prefix>_<year>.csv` — transaction detail, FIFO disposal detail, tax summary
+- **Form 1399 PDF** — `starknet_tax_<address prefix>_<year>_form1399.pdf` — generated when there are disposal events (skipped otherwise)
+
+`--output` / `-o` sets only the **CSV** file path. The PDF is always the same path with `_form1399` inserted before `.csv` (e.g. `out/report.csv` → `out/report_form1399.pdf`).
 
 The CSV **Section 1** rows are only transactions **dated inside** `--from-date` … `--to-date`. Dune still loads your full history so FIFO is correct; staking deposits/withdrawals outside the tax year won’t appear in the CSV even though they’re counted in Step 2’s classification totals.
 
@@ -93,9 +95,10 @@ export STARKNET_RPC_URL='https://starknet-mainnet.g.alchemy.com/starknet/version
 | `-a`, `--address` | StarkNet account contract address (required) |
 | `-f`, `--from-date` | Start date `YYYY-MM-DD`, inclusive (required) |
 | `-t`, `--to-date` | End date `YYYY-MM-DD`, inclusive (required) |
-| `-o`, `--output` | Output CSV path (default: auto-named from address and year) |
+| `-o`, `--output` | **CSV** output path (default: `starknet_tax_<address prefix>_<year>.csv`). The Form 1399 PDF is written next to it by replacing `.csv` with `_form1399.pdf` (same folder). |
 | `--dune-api-key` | **Required.** Dune API key, or set env **`DUNE_API_KEY`** |
 | `--rpc-url` | StarkNet JSON-RPC URL; env: **`STARKNET_RPC_URL`** (default: public Pathfinder mainnet) |
+| `--ignore-unknown-tokens` | Skip `Transfer` events from token contracts not listed in `config.py` instead of aborting. **Use sparingly** — omitted flows can make FIFO and tax wrong; prefer adding each contract to **`ADDRESS_TO_TOKEN`** (track) or **`IGNORED_TOKEN_CONTRACTS`** (ignore explicitly). |
 
 Run `starknet-tax --help` for the full inline help.
 
@@ -119,6 +122,7 @@ USD/ILS exchange rates come from Yahoo Finance (`USDILS=X`). See `starknet_tax/p
 | **RECEIVE events** | Incoming transfers are treated as cost-basis acquisitions at FMV. If any are airdrops, grants, or staking distributions, they are **unreported income** — verify each one manually. |
 | **Surtax rate** | Default is 3 % (Section 121B(f)). Some CPAs apply 5 % if crypto capital income falls under Section 121B(b). Consult your CPA. |
 | **Form 1399 deadlines** | The tool does **not** track the 30-day filing window. Each disposal must be reported on Form 1399 within 30 days — the taxpayer is responsible. |
+| **Unknown token contracts** | By default the run **stops** until every ERC-20 contract is listed in `config.py`. **`--ignore-unknown-tokens`** continues without those transfers (warning printed); only use if you accept incomplete figures. |
 
 ## Legal disclaimer
 

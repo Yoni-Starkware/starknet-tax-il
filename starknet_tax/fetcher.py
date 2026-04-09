@@ -269,6 +269,40 @@ def _assert_no_unknown_transfers(
     raise RuntimeError("\n".join(lines))
 
 
+def _warn_unknown_transfers_ignored(
+    unknown: list[tuple[str, str]],
+) -> None:
+    """Print a visible warning when --ignore-unknown-tokens skips unlisted contracts."""
+    if not unknown:
+        return
+
+    by_contract: dict[str, list[str]] = {}
+    for tx_hash, contract in unknown:
+        by_contract.setdefault(contract, []).append(tx_hash)
+
+    lines = [
+        "",
+        "─" * 72,
+        "WARNING: ignoring Transfer events from unknown token contracts "
+        "(--ignore-unknown-tokens).",
+        "─" * 72,
+        "",
+        "These flows are omitted from the report. FIFO and tax figures may be wrong "
+        "if any material balance involved these tokens. Add contracts to "
+        "ADDRESS_TO_TOKEN or IGNORED_TOKEN_CONTRACTS in config.py when possible.",
+        "",
+        "Ignored contracts:",
+    ]
+    for contract, txs in sorted(by_contract.items()):
+        lines.append(f"  {contract}  ({len(txs)} transaction(s))")
+        for tx in txs[:3]:
+            lines.append(f"    tx: {tx}")
+        if len(txs) > 3:
+            lines.append(f"    ... and {len(txs) - 3} more")
+    lines += ["", "─" * 72]
+    print("\n".join(lines))
+
+
 # ── Dune Analytics ───────────────────────────────────────────────────────────
 
 _DUNE_API_BASE = "https://api.dune.com/api/v1"
@@ -424,6 +458,7 @@ def _fetch_and_parse_receipts(
     from_date: date,
     to_date: date,
     skip_date_filter: bool = False,
+    ignore_unknown_tokens: bool = False,
 ) -> list[ParsedTransaction]:
     """
     Fetch the receipt for every tx hash, parse token flows and fees.
@@ -503,8 +538,11 @@ def _fetch_and_parse_receipts(
         parsed.append(ptx)
         time.sleep(0.03)
 
-    # Fail loudly if any unrecognised token contracts were encountered.
-    _assert_no_unknown_transfers(unknown_transfers)
+    if unknown_transfers:
+        if ignore_unknown_tokens:
+            _warn_unknown_transfers_ignored(unknown_transfers)
+        else:
+            _assert_no_unknown_transfers(unknown_transfers)
 
     parsed.sort(key=lambda p: p.timestamp)
     return parsed
@@ -518,6 +556,8 @@ def fetch_transactions(
     to_date: date,
     rpc_url: Optional[str],
     dune_api_key: str,
+    *,
+    ignore_unknown_tokens: bool = False,
 ) -> list[ParsedTransaction]:
     """
     Fetch and parse all transactions for `address`.
@@ -525,6 +565,9 @@ def fetch_transactions(
     Tx hashes come from Dune Analytics (all-time). Receipts are loaded via RPC.
     No date filter on returned transactions — process_events() limits the tax
     summary to [from_date, to_date] while FIFO runs over full history.
+
+    If *ignore_unknown_tokens* is True, Transfer events from contracts not listed
+    in config are skipped (with a console warning) instead of aborting.
     """
     norm_addr = _norm(address)
     rpc = _pick_rpc(rpc_url)
@@ -536,5 +579,11 @@ def fetch_transactions(
         return []
 
     return _fetch_and_parse_receipts(
-        rpc, norm_addr, tx_hashes, from_date, to_date, skip_date_filter=True
+        rpc,
+        norm_addr,
+        tx_hashes,
+        from_date,
+        to_date,
+        skip_date_filter=True,
+        ignore_unknown_tokens=ignore_unknown_tokens,
     )
