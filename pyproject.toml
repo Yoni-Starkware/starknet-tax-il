@@ -20,6 +20,14 @@ dependencies = [
 [project.scripts]
 starknet-tax = "starknet_tax.cli:main"
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["starknet_tax*"]
