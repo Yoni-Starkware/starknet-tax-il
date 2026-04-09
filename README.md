@@ -23,7 +23,7 @@ plus a supporting **Form 1399י-style PDF** for disposal events.
 
 ETH, STRK, xSTRK, USDC, USDCe (bridged USDC), USDT, DAI, WBTC, wstETH.
 
-To add a token, update `ADDRESS_TO_TOKEN` and `TOKEN_DECIMALS` in `starknet_tax/config.py`.
+To add support for a new token, open an issue or PR on the repository (or edit `ADDRESS_TO_TOKEN` and `TOKEN_DECIMALS` when developing from a source checkout).
 
 ## Install
 
@@ -98,7 +98,7 @@ export STARKNET_RPC_URL='https://starknet-mainnet.g.alchemy.com/starknet/version
 | `-o`, `--output` | **CSV** output path (default: `starknet_tax_<address prefix>_<year>.csv`). The Form 1399 PDF is written next to it by replacing `.csv` with `_form1399.pdf` (same folder). |
 | `--dune-api-key` | **Required.** Dune API key, or set env **`DUNE_API_KEY`** |
 | `--rpc-url` | StarkNet JSON-RPC URL; env: **`STARKNET_RPC_URL`** (default: public Pathfinder mainnet) |
-| `--ignore-unknown-tokens` | Skip `Transfer` events from token contracts not listed in `config.py` instead of aborting. **Use sparingly** — omitted flows can make FIFO and tax wrong; prefer adding each contract to **`ADDRESS_TO_TOKEN`** (track) or **`IGNORED_TOKEN_CONTRACTS`** (ignore explicitly). |
+| `--ignore-unknown-tokens` | Skip `Transfer` events from **unsupported** token contracts instead of aborting. **Use sparingly** — omitted flows can make FIFO and tax wrong; prefer **opening an issue or PR** so the contract can be added to the tool. |
 
 Run `starknet-tax --help` for the full inline help.
 
@@ -122,7 +122,7 @@ USD/ILS exchange rates come from Yahoo Finance (`USDILS=X`). See `starknet_tax/p
 | **RECEIVE events** | Incoming transfers are treated as cost-basis acquisitions at FMV. If any are airdrops, grants, or staking distributions, they are **unreported income** — verify each one manually. |
 | **Surtax rate** | Default is 3 % (Section 121B(f)). Some CPAs apply 5 % if crypto capital income falls under Section 121B(b). Consult your CPA. |
 | **Form 1399 deadlines** | The tool does **not** track the 30-day filing window. Each disposal must be reported on Form 1399 within 30 days — the taxpayer is responsible. |
-| **Unknown token contracts** | By default the run **stops** until every ERC-20 contract is listed in `config.py`. **`--ignore-unknown-tokens`** continues without those transfers (warning printed); only use if you accept incomplete figures. |
+| **Unknown token contracts** | By default the run **stops** if your history includes an ERC-20 the release does not support yet. **`--ignore-unknown-tokens`** continues without those transfers (warning printed); only use if you accept incomplete figures. |
 
 ## Legal disclaimer
 

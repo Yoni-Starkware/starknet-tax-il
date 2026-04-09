@@ -71,10 +71,11 @@ LIQUID_STAKING_SOURCES: dict[str, tuple[str, str]] = {
 
 STABLECOINS: set[str] = {"USDC", "USDCe", "USDT", "DAI"}
 
-# Contracts that emit ERC-20 Transfer events but whose tokens you explicitly do not
-# want to track (e.g. LP tokens, internal reward tokens, dust).
-# Every Transfer from a contract NOT in ADDRESS_TO_TOKEN and NOT here will cause the
-# report to fail with an error.  You must make a conscious choice for every token.
+# Maintainer-only: contracts whose Transfer events are skipped (e.g. LP dust).
+# End users normally cannot change this when installing from PyPI — use
+# --ignore-unknown-tokens for one-off runs or contribute ADDRESS_TO_TOKEN entries.
+# Every Transfer from a contract NOT in ADDRESS_TO_TOKEN and NOT here fails the run
+# unless --ignore-unknown-tokens is used.
 IGNORED_TOKEN_CONTRACTS: set[str] = set()
 
 # ── Protocol contracts ───────────────────────────────────────────────────────

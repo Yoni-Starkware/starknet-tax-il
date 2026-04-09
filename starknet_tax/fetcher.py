@@ -245,17 +245,15 @@ def _assert_no_unknown_transfers(
         "═" * 72,
         "",
         "The following contracts emitted ERC-20 Transfer events in your transactions",
-        "but are not listed in ADDRESS_TO_TOKEN or IGNORED_TOKEN_CONTRACTS in config.py.",
+        "but are not listed in ADDRESS_TO_TOKEN (supported tokens are shipped with the package).",
         "",
-        "You must make an explicit choice for each one:",
+        "  Option A — get the token supported:",
+        "    Open an issue or PR on the starknet-tax-il GitHub repo with the contract address,",
+        "    or edit ADDRESS_TO_TOKEN / TOKEN_DECIMALS when installing from a source checkout.",
         "",
-        "  Option A — track the token:",
-        '    Add to ADDRESS_TO_TOKEN in config.py, e.g.:',
-        '    "0xCONTRACT_ADDRESS": "SYMBOL",',
-        "",
-        "  Option B — explicitly ignore it (LP tokens, dust, internal reward tokens, etc.):",
-        '    Add to IGNORED_TOKEN_CONTRACTS in config.py, e.g.:',
-        '    "0xCONTRACT_ADDRESS",  # brief description of why it is ignored',
+        "  Option B — continue without these transfers (incomplete FIFO/tax):",
+        "    Re-run the same command with:  --ignore-unknown-tokens",
+        "    (Those Transfer events are omitted; use only if you accept wrong or partial figures.)",
         "",
         "Unknown contracts:",
     ]
@@ -265,7 +263,11 @@ def _assert_no_unknown_transfers(
             lines.append(f"    tx: {tx}")
         if len(txs) > 3:
             lines.append(f"    ... and {len(txs) - 3} more")
-    lines += ["", "═" * 72]
+    lines += [
+        "",
+        "To retry while skipping unknown contracts: add --ignore-unknown-tokens to your command.",
+        "═" * 72,
+    ]
     raise RuntimeError("\n".join(lines))
 
 
@@ -288,8 +290,8 @@ def _warn_unknown_transfers_ignored(
         "─" * 72,
         "",
         "These flows are omitted from the report. FIFO and tax figures may be wrong "
-        "if any material balance involved these tokens. Add contracts to "
-        "ADDRESS_TO_TOKEN or IGNORED_TOKEN_CONTRACTS in config.py when possible.",
+        "if any material balance involved these tokens. Prefer opening an issue or PR "
+        "to add support for the contract in ADDRESS_TO_TOKEN when possible.",
         "",
         "Ignored contracts:",
     ]

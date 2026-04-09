@@ -89,9 +89,9 @@ def _require_dune_key(
     is_flag=True,
     default=False,
     help=(
-        "Omit ERC-20 Transfer events from token contracts not listed in "
-        "config.py instead of aborting. May produce incomplete FIFO/tax figures; "
-        "prefer adding tokens to ADDRESS_TO_TOKEN or IGNORED_TOKEN_CONTRACTS."
+        "Omit ERC-20 Transfer events from unsupported token contracts instead of "
+        "aborting. May produce incomplete FIFO/tax figures; prefer opening an issue "
+        "or PR to add the contract to ADDRESS_TO_TOKEN in the project."
     ),
 )
 def main(
