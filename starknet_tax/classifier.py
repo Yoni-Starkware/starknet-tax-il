@@ -21,6 +21,7 @@ from .config import (
     ALL_PROTOCOL_CONTRACTS,
     DEFI_INCOME_CONTRACTS,
     DEX_CONTRACTS,
+    LIQUID_STAKING_SOURCES,
     POOL_MEMBER_EXIT_ACTION_SELECTOR,
     POOL_MEMBER_REWARD_CLAIMED_SELECTOR,
     STAKER_REWARD_CLAIMED_SELECTOR,
@@ -36,8 +37,8 @@ class EventType(str, Enum):
     AIRDROP = "AIRDROP"                   # received without sending → income
     SEND = "SEND"                         # outgoing transfer → CGT (disposal)
     RECEIVE = "RECEIVE"                   # incoming purchase / gift → cost basis
-    LIQUID_STAKE = "LIQUID_STAKE"         # STRK → xSTRK (taxable exchange)
-    LIQUID_UNSTAKE = "LIQUID_UNSTAKE"     # xSTRK → STRK (taxable exchange)
+    LIQUID_STAKE = "LIQUID_STAKE"         # deposit into vault, e.g. STRK→xSTRK, WBTC→vWBTC
+    LIQUID_UNSTAKE = "LIQUID_UNSTAKE"     # withdraw from vault, e.g. xSTRK→STRK, vWBTC→WBTC
     STAKE_DEPOSIT = "STAKE_DEPOSIT"       # STRK delegated to staking pool (non-taxable lock-up)
     STAKE_WITHDRAWAL = "STAKE_WITHDRAWAL" # staked STRK principal returned (non-taxable)
     FEE_ONLY = "FEE_ONLY"                 # only gas paid, no token movement
@@ -100,24 +101,34 @@ def _touches_staking(ptx: ParsedTransaction) -> bool:
     return STAKING_CONTRACT in ptx.touched_contracts
 
 
+# Build lookup sets from LIQUID_STAKING_SOURCES: {(parent, vault), (vault, parent)}
+_LIQUID_PAIRS: set[tuple[str, str]] = set()
+for _v_sym, (_p_sym, _) in LIQUID_STAKING_SOURCES.items():
+    _LIQUID_PAIRS.add((_p_sym, _v_sym))   # deposit: parent out → vault in
+    _LIQUID_PAIRS.add((_v_sym, _p_sym))   # withdraw: vault out → parent in
+
+
 def _is_liquid_stake(ptx: ParsedTransaction) -> bool:
-    """STRK goes out, xSTRK comes in (or vice versa)."""
+    """Parent token goes out and vault token comes in (or vice versa)."""
     symbols_in = {f.symbol for f in ptx.tokens_in}
     symbols_out = {f.symbol for f in ptx.tokens_out}
-    return (
-        ("STRK" in symbols_out and "xSTRK" in symbols_in)
-        or ("xSTRK" in symbols_out and "STRK" in symbols_in)
-    )
+    for sym_out in symbols_out:
+        for sym_in in symbols_in:
+            if (sym_out, sym_in) in _LIQUID_PAIRS:
+                return True
+    return False
 
 
 def classify(ptx: ParsedTransaction) -> TaxEvent:
     has_in = bool(ptx.tokens_in)
     has_out = bool(ptx.tokens_out)
 
-    # ── Liquid staking ───────────────────────────────────────────────────────
+    # ── Liquid staking / vault deposit-withdraw ─────────────────────────────
     if _is_liquid_stake(ptx):
         symbols_out = {f.symbol for f in ptx.tokens_out}
-        etype = EventType.LIQUID_STAKE if "STRK" in symbols_out else EventType.LIQUID_UNSTAKE
+        parent_symbols = {p for _, (p, _) in LIQUID_STAKING_SOURCES.items()}
+        is_deposit = bool(symbols_out & parent_symbols)
+        etype = EventType.LIQUID_STAKE if is_deposit else EventType.LIQUID_UNSTAKE
         return TaxEvent(
             tx_hash=ptx.tx_hash,
             timestamp=ptx.timestamp,
@@ -126,7 +137,7 @@ def classify(ptx: ParsedTransaction) -> TaxEvent:
             tokens_out=ptx.tokens_out,
             fee_token=ptx.fee_token,
             fee_amount=ptx.fee_amount,
-            notes="Liquid staking exchange — treated as taxable crypto-to-crypto swap under ITA rules.",
+            notes="Vault deposit/withdraw — treated as taxable crypto-to-crypto swap under ITA rules.",
         )
 
     # ── Staking reward claim / principal withdrawal ─────────────────────────

@@ -31,6 +31,8 @@ ADDRESS_TO_TOKEN: dict[str, str] = {
     "0x042b8f0484674ca266ac5d08e4ac6a3fe65bd3129795def2dca5c34ecc5f96d2": "wstETH",
     # Endur liquid-staked STRK (verified from on-chain Transfer events)
     "0x028d709c875c0ceac3dce7065bec5328186dc89fe254527084d1689910954b0a": "xSTRK",
+    # Vesu Wrapped BTC — ERC-4626 vault share representing WBTC deposited in Vesu lending
+    "0x00C452baCd439bAb4E39aEea190B4fF81F44b019d4b3A25fA4da04A1CaE7B6Ff": "vWBTC",
 }
 
 TOKEN_DECIMALS: dict[str, int] = {
@@ -43,6 +45,7 @@ TOKEN_DECIMALS: dict[str, int] = {
     "WBTC": 8,
     "wstETH": 18,
     "xSTRK": 18,
+    "vWBTC": 18,
 }
 
 COINGECKO_IDS: dict[str, str] = {
@@ -66,6 +69,10 @@ LIQUID_STAKING_SOURCES: dict[str, tuple[str, str]] = {
     "xSTRK": (
         "STRK",
         "0x028d709c875c0ceac3dce7065bec5328186dc89fe254527084d1689910954b0a",
+    ),
+    "vWBTC": (
+        "WBTC",
+        "0x00C452baCd439bAb4E39aEea190B4fF81F44b019d4b3A25fA4da04A1CaE7B6Ff",
     ),
 }
 

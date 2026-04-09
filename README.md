@@ -13,7 +13,7 @@ plus a supporting **Form 1399י-style PDF** for disposal events.
 | DEX swaps (Ekubo, JediSwap, …) | Capital gain/loss on disposed token |
 | STRK native staking rewards | Income at FMV on claim date |
 | STRK staking deposit / withdrawal | Non-taxable lock-up / unlock (no gain/loss) |
-| Endur liquid staking (STRK ↔ xSTRK) | Taxable crypto-to-crypto exchange |
+| Vault deposit/withdraw (xSTRK, vWBTC, …) | Taxable crypto-to-crypto exchange |
 | DeFi yield (zkLend, Nostra interest) | Income at FMV on receipt |
 | Airdrops / unknown inflows | Flagged — review manually |
 | Outgoing transfers | Treated as disposal (CGT) |
@@ -21,7 +21,7 @@ plus a supporting **Form 1399י-style PDF** for disposal events.
 
 ### Supported tokens
 
-ETH, STRK, xSTRK, USDC, USDCe (bridged USDC), USDT, DAI, WBTC, wstETH.
+ETH, STRK, xSTRK (Endur), USDC, USDCe (bridged USDC), USDT, DAI, WBTC, vWBTC (Vesu), wstETH.
 
 To add support for a new token, open an issue or PR on the repository (or edit `ADDRESS_TO_TOKEN` and `TOKEN_DECIMALS` when developing from a source checkout).
 

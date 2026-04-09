@@ -19,7 +19,7 @@ from typing import Optional
 
 import requests
 
-from .config import COINGECKO_IDS, LIQUID_STAKING_SOURCES, STABLECOINS
+from .config import COINGECKO_IDS, LIQUID_STAKING_SOURCES, STABLECOINS, TOKEN_DECIMALS
 
 DEFILLAMA_CHART_URL = "https://coins.llama.fi/chart/{coins}"
 
@@ -195,15 +195,20 @@ def _fetch_onchain_exchange_rate(
     rpc_url: str,
     block_id: str | dict = "latest",
     session: requests.Session | None = None,
+    *,
+    vault_decimals: int = 18,
+    asset_decimals: int = 18,
 ) -> Decimal:
     """
-    Call vault.convert_to_assets(1e18) at *block_id*.
-    Returns the number of parent-token units equivalent to 1 liquid-staking token.
+    Call vault.convert_to_assets(10^vault_decimals) at *block_id*.
+    Returns the number of parent-token units equivalent to 1 vault token.
 
-    Raises RuntimeError if the call fails after retries.
+    *vault_decimals* is the ERC-20 decimal count of the vault share token.
+    *asset_decimals* is the ERC-20 decimal count of the underlying asset.
+    The returned Decimal equals ``raw_result / 10^asset_decimals``.
     """
-    ONE_E18_LOW  = hex(10 ** 18)
-    ONE_E18_HIGH = "0x0"
+    one_share_low  = hex(10 ** vault_decimals)
+    one_share_high = "0x0"
 
     result = _rpc_call(
         rpc_url,
@@ -212,7 +217,7 @@ def _fetch_onchain_exchange_rate(
             "request": {
                 "contract_address": vault_contract,
                 "entry_point_selector": _CONVERT_TO_ASSETS_SELECTOR,
-                "calldata": [ONE_E18_LOW, ONE_E18_HIGH],
+                "calldata": [one_share_low, one_share_high],
             },
             "block_id": block_id,
         },
@@ -223,7 +228,7 @@ def _fetch_onchain_exchange_rate(
     low  = int(result[0], 16)
     high = int(result[1], 16) if len(result) > 1 else 0
     raw  = low + (high << 128)
-    return Decimal(raw) / Decimal(10 ** 18)
+    return Decimal(raw) / Decimal(10 ** asset_decimals)
 
 
 # ── PriceCache ────────────────────────────────────────────────────────────────
@@ -339,10 +344,14 @@ class PriceCache:
                     f"Cannot price {symbol}: parent token {parent_symbol} has no cached prices."
                 )
 
+            v_dec = TOKEN_DECIMALS.get(symbol, 18)
+            a_dec = TOKEN_DECIMALS.get(parent_symbol, 18)
+
             print(f"  Fetching {symbol} vault rate (latest" +
                   (f" + block {earliest_block}" if earliest_block else "") + ")...")
             rate_end = _fetch_onchain_exchange_rate(
                 vault_contract, self._rpc_url, "latest", self._session,
+                vault_decimals=v_dec, asset_decimals=a_dec,
             )
 
             rate_start = rate_end
@@ -351,6 +360,7 @@ class PriceCache:
                     rate_start = _fetch_onchain_exchange_rate(
                         vault_contract, self._rpc_url,
                         {"block_number": earliest_block}, self._session,
+                        vault_decimals=v_dec, asset_decimals=a_dec,
                     )
                 except Exception as exc:
                     print(f"  Warning: historical vault rate fetch failed ({exc}); "
