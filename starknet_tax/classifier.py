@@ -22,6 +22,7 @@ from .config import (
     DEFI_INCOME_CONTRACTS,
     DEX_CONTRACTS,
     LIQUID_STAKING_SOURCES,
+    NEW_POOL_MEMBER_SELECTOR,
     POOL_MEMBER_EXIT_ACTION_SELECTOR,
     POOL_MEMBER_REWARD_CLAIMED_SELECTOR,
     STAKER_REWARD_CLAIMED_SELECTOR,
@@ -39,8 +40,8 @@ class EventType(str, Enum):
     RECEIVE = "RECEIVE"                   # incoming purchase / gift → cost basis
     LIQUID_STAKE = "LIQUID_STAKE"         # deposit into vault, e.g. STRK→xSTRK, WBTC→vWBTC
     LIQUID_UNSTAKE = "LIQUID_UNSTAKE"     # withdraw from vault, e.g. xSTRK→STRK, vWBTC→WBTC
-    STAKE_DEPOSIT = "STAKE_DEPOSIT"       # STRK delegated to staking pool (non-taxable lock-up)
-    STAKE_WITHDRAWAL = "STAKE_WITHDRAWAL" # staked STRK principal returned (non-taxable)
+    STAKE_DEPOSIT = "STAKE_DEPOSIT"       # tokens delegated to staking pool (non-taxable lock-up)
+    STAKE_WITHDRAWAL = "STAKE_WITHDRAWAL" # staked principal returned (non-taxable)
     FEE_ONLY = "FEE_ONLY"                 # only gas paid, no token movement
     UNKNOWN = "UNKNOWN"                   # needs manual review
 
@@ -82,6 +83,16 @@ def _has_staking_claim_event(ptx: ParsedTransaction) -> bool:
 def _has_staking_exit_event(ptx: ParsedTransaction) -> bool:
     """Return True if the tx contains a PoolMemberExitAction event (principal withdrawal)."""
     selector = POOL_MEMBER_EXIT_ACTION_SELECTOR.lower()
+    for event in ptx.raw_events:
+        keys = event.get("keys", [])
+        if keys and keys[0].lower() == selector:
+            return True
+    return False
+
+
+def _has_new_pool_member_event(ptx: ParsedTransaction) -> bool:
+    """Return True if the tx contains a NewPoolMember event (delegation pool deposit)."""
+    selector = NEW_POOL_MEMBER_SELECTOR.lower()
     for event in ptx.raw_events:
         keys = event.get("keys", [])
         if keys and keys[0].lower() == selector:
@@ -222,6 +233,25 @@ def classify(ptx: ParsedTransaction) -> TaxEvent:
 
     # ── Tokens out only ──────────────────────────────────────────────────────
     if has_out and not has_in:
+        # Delegating tokens to a staking / delegation pool — non-taxable lock-up.
+        # The tokens remain yours; only the rewards are taxable (as STAKING_INCOME).
+        # Detected via STRK going to the staking contract, or a NewPoolMember event
+        # emitted by any delegation pool (covers multi-token staking).
+        is_strk_stake = _touches_staking(ptx) and all(
+            f.symbol == "STRK" for f in ptx.tokens_out
+        )
+        if is_strk_stake or _has_new_pool_member_event(ptx):
+            symbols = ", ".join(sorted({f.symbol for f in ptx.tokens_out}))
+            return TaxEvent(
+                tx_hash=ptx.tx_hash,
+                timestamp=ptx.timestamp,
+                event_type=EventType.STAKE_DEPOSIT,
+                tokens_in=[],
+                tokens_out=ptx.tokens_out,
+                fee_token=ptx.fee_token,
+                fee_amount=ptx.fee_amount,
+                notes=f"{symbols} staked/delegated — non-taxable lock-up. Tokens remain in your FIFO inventory.",
+            )
         if not ptx.touched_contracts & ALL_PROTOCOL_CONTRACTS:
             return TaxEvent(
                 tx_hash=ptx.tx_hash,
@@ -232,22 +262,6 @@ def classify(ptx: ParsedTransaction) -> TaxEvent:
                 fee_token=ptx.fee_token,
                 fee_amount=ptx.fee_amount,
                 notes="Outgoing transfer — treated as disposal; capital gain/loss calculated.",
-            )
-        # Delegating STRK to the native staking contract — non-taxable lock-up.
-        # The tokens remain yours; only the rewards are taxable (as STAKING_INCOME).
-        # Only classify as STAKE_DEPOSIT when the outgoing token is actually STRK;
-        # other tokens touching the staking contract (e.g. collateral deposits in the
-        # same tx) fall through to UNKNOWN for manual review.
-        if _touches_staking(ptx) and all(f.symbol == "STRK" for f in ptx.tokens_out):
-            return TaxEvent(
-                tx_hash=ptx.tx_hash,
-                timestamp=ptx.timestamp,
-                event_type=EventType.STAKE_DEPOSIT,
-                tokens_in=[],
-                tokens_out=ptx.tokens_out,
-                fee_token=ptx.fee_token,
-                fee_amount=ptx.fee_amount,
-                notes="STRK staked/delegated — non-taxable lock-up. Tokens remain in your FIFO inventory.",
             )
         # Sending to some other protocol without receiving anything back
         return TaxEvent(

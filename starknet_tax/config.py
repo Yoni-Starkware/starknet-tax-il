@@ -139,6 +139,7 @@ POOL_MEMBER_REWARD_CLAIMED_SELECTOR = _sn_keccak("PoolMemberRewardClaimed")
 STAKER_REWARD_CLAIMED_SELECTOR = _sn_keccak("StakerRewardClaimed")
 DELEGATION_POOL_MEMBER_EXIT_INTENT_SELECTOR = _sn_keccak("PoolMemberExitIntent")
 POOL_MEMBER_EXIT_ACTION_SELECTOR = _sn_keccak("PoolMemberExitAction")
+NEW_POOL_MEMBER_SELECTOR = _sn_keccak("NewPoolMember")
 
 # ── API endpoints ────────────────────────────────────────────────────────────
 
