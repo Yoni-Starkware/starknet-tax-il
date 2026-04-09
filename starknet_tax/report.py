@@ -246,9 +246,9 @@ def write_summary_section(
         ("Token prices",
          "USD prices from DeFiLlama (daily snapshots); intraday volatility may cause "
          "±1-2% variance from actual execution prices."),
-        ("Liquid staking (xSTRK)",
-         "Priced via on-chain vault exchange rate (interpolated between period start and "
-         "latest block). Small approximation error possible vs. exact block-level rate."),
+        ("Vault tokens (xSTRK, vWBTC, …)",
+         "Priced via on-chain vault exchange rate (interpolated between earliest-tx block "
+         "and latest block). Small approximation error possible vs. exact block-level rate."),
         ("Disclaimer / הצהרה",
          "THIS REPORT IS NOT TAX ADVICE. It is a computational aid only. "
          "All figures, classifications, and tax calculations must be reviewed and "

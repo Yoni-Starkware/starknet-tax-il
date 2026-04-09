@@ -235,9 +235,10 @@ def classify(ptx: ParsedTransaction) -> TaxEvent:
             )
         # Delegating STRK to the native staking contract — non-taxable lock-up.
         # The tokens remain yours; only the rewards are taxable (as STAKING_INCOME).
-        # Note: when you eventually unstake, the returned STRK will appear as RECEIVE
-        # from the pool contract — verify it doesn't create a duplicate cost basis.
-        if _touches_staking(ptx):
+        # Only classify as STAKE_DEPOSIT when the outgoing token is actually STRK;
+        # other tokens touching the staking contract (e.g. collateral deposits in the
+        # same tx) fall through to UNKNOWN for manual review.
+        if _touches_staking(ptx) and all(f.symbol == "STRK" for f in ptx.tokens_out):
             return TaxEvent(
                 tx_hash=ptx.tx_hash,
                 timestamp=ptx.timestamp,
