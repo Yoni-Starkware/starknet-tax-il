@@ -49,16 +49,9 @@ from .tax import ProcessedEvent, TaxSummary
 
 
 def _bidi(text: str) -> str:
-    """
-    Apply Unicode BiDi reordering so Hebrew renders correctly in ReportLab
-    (which treats all text as left-to-right).
-    Falls back to identity if python-bidi is not installed.
-    """
-    try:
-        from bidi.algorithm import get_display  # type: ignore
-        return get_display(text)
-    except ImportError:
-        return text
+    """Apply Unicode BiDi reordering so Hebrew renders correctly in ReportLab."""
+    from bidi.algorithm import get_display  # type: ignore
+    return get_display(text)
 
 
 # ── Font registration ─────────────────────────────────────────────────────────
