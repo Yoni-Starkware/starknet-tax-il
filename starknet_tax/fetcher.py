@@ -118,7 +118,10 @@ class RpcClient:
                 if attempt == 4:
                     raise
                 time.sleep(2 ** attempt)
-        return None
+        raise RuntimeError(
+            f"RPC call {method!r} failed after 5 attempts: "
+            "all attempts returned 429/5xx without raising."
+        )
 
     def block_number(self) -> int:
         return int(self._call("starknet_blockNumber", []))
@@ -138,15 +141,17 @@ class RpcClient:
 
 def _pick_rpc(override: Optional[str]) -> RpcClient:
     urls = [override] if override else PUBLIC_RPC_URLS
+    errors: list[str] = []
     for url in urls:
         try:
             client = RpcClient(url)
             client.block_number()
             return client
-        except Exception:
-            continue
+        except Exception as exc:
+            errors.append(f"  {url}: {exc}")
     raise RuntimeError(
         "Could not connect to any StarkNet RPC.\n"
+        "Tried:\n" + "\n".join(errors) + "\n"
         "Pass your Alchemy URL via --rpc-url or the STARKNET_RPC_URL env var.\n"
         "  Example: --rpc-url https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_10/YOUR_KEY"
     )

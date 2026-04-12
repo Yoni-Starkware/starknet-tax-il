@@ -114,14 +114,21 @@ def process_events(
         evt.price_ils_in = prices_in
         evt.price_ils_out = prices_out
 
-        if missing_price and in_period:
+        if missing_price:
             missing = [f.symbol for f in evt.tokens_in + evt.tokens_out
                        if prices.get(f.symbol, d) is None]
-            raise RuntimeError(
-                f"Missing ILS price for {', '.join(missing)} on {d} "
-                f"(tx {evt.tx_hash[:14]}...). "
-                f"Price fetch must have failed — re-run or check internet connection."
-            )
+            if in_period:
+                raise RuntimeError(
+                    f"Missing ILS price for {', '.join(missing)} on {d} "
+                    f"(tx {evt.tx_hash[:14]}...). "
+                    f"Price fetch must have failed — re-run or check internet connection."
+                )
+            else:
+                print(
+                    f"  Warning: no ILS price for {', '.join(missing)} on {d} "
+                    f"(out-of-period tx {evt.tx_hash[:14]}...). "
+                    f"Cost basis recorded as ₪0 — FIFO figures may be inaccurate."
+                )
 
         # ── Handle each event type ───────────────────────────────────────────
         # FIFO acquire/dispose runs for ALL events (full history needed for

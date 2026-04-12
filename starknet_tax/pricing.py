@@ -362,9 +362,9 @@ class PriceCache:
                         {"block_number": earliest_block}, self._session,
                         vault_decimals=v_dec, asset_decimals=a_dec,
                     )
-                except Exception as exc:
-                    print(f"  Warning: historical vault rate fetch failed ({exc}); "
-                          f"using latest-only.")
+                except RuntimeError as exc:
+                    print(f"  Warning: historical {symbol} vault rate fetch failed ({exc}); "
+                          f"using latest-only rate for entire period.")
 
             total_days = max(1, (effective_to - from_date).days)
             print(
